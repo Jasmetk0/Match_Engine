@@ -5,11 +5,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.analytics import router as analytics_router
+from app.api.dev import router as dev_router
 from app.api.health import router as health_router
 from app.api.match import router as match_router
 from app.api.players import router as players_router
 from app.api.saved_matches import router as saved_matches_router
 from app.db.init_db import init_db
+from app.metadata import APP_NAME, APP_VERSION
 
 
 @asynccontextmanager
@@ -20,9 +22,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="Squash Match Lab API",
+    title=f"{APP_NAME} API",
     description="Local API for squash match simulation experiments.",
-    version="0.1.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -39,3 +41,4 @@ app.include_router(players_router)
 app.include_router(match_router)
 app.include_router(saved_matches_router)
 app.include_router(analytics_router)
+app.include_router(dev_router)

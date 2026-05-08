@@ -723,3 +723,11 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+pre.dev-result {
+  white-space: pre-wrap;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.85rem;
+  padding: 0.85rem;
+}

@@ -78,6 +78,7 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
 
   const selectedA = useMemo(() => profiles.find((profile) => profile.id === playerAProfileId), [profiles, playerAProfileId]);
   const selectedB = useMemo(() => profiles.find((profile) => profile.id === playerBProfileId), [profiles, playerBProfileId]);
+  const sameProfileSelected = Boolean(playerAProfileId && playerBProfileId && playerAProfileId === playerBProfileId);
 
   function clearGeneratedState() {
     setPreview(null);
@@ -202,6 +203,12 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+      {profiles.length === 0 && loading !== 'profiles' && (
+        <div className="error-banner">No season profiles found. Go to Players and reset elite sample players.</div>
+      )}
+      {sameProfileSelected && (
+        <div className="error-banner">Choose two different season profiles before running a preview, match, or batch simulation.</div>
+      )}
 
       <div className="editor-card match-control-card">
         <div className="form-grid">
@@ -232,17 +239,18 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
           <label className="field-label">
             <span>Monte Carlo runs</span>
             <input max={3000} min={50} step={50} type="number" value={runs} onChange={(event) => setRuns(Number(event.target.value))} />
+            <small>500 is recommended for fast local testing. Higher runs are useful but may feel slow on older PCs.</small>
           </label>
         </div>
         <div className="button-row match-actions">
-          <button className="primary-button" disabled={loading !== null || profiles.length < 2} onClick={calculatePreview} type="button">
+          <button className="primary-button" disabled={loading !== null || profiles.length < 2 || sameProfileSelected} onClick={calculatePreview} type="button">
             {loading === 'preview' ? 'Calculating…' : 'Calculate Probabilities'}
           </button>
-          <button className="ghost-button" disabled={loading !== null || profiles.length < 2} onClick={() => generate()} type="button">
+          <button className="ghost-button" disabled={loading !== null || profiles.length < 2 || sameProfileSelected} onClick={() => generate()} type="button">
             {loading === 'generate' ? 'Generating…' : 'Generate Match'}
           </button>
           <button className="ghost-button" disabled={loading !== null} onClick={randomizeSeed} type="button">Randomize Seed</button>
-          <button className="ghost-button" disabled={loading !== null || profiles.length < 2} onClick={regenerate} type="button">
+          <button className="ghost-button" disabled={loading !== null || profiles.length < 2 || sameProfileSelected} onClick={regenerate} type="button">
             {loading === 'generate' ? 'Regenerating…' : 'Regenerate Match'}
           </button>
           <button className="ghost-button" disabled={!result} type="button" onClick={() => document.getElementById('save-match-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>Save Match</button>
@@ -274,7 +282,7 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
           <div className="form-grid compact-grid">
             <label className="field-label"><span>Number of matches</span><input max={200} min={5} type="number" value={batchRuns} onChange={(event) => setBatchRuns(Number(event.target.value))} /></label>
           </div>
-          <button className="primary-button" disabled={loading !== null || profiles.length < 2} onClick={runBatchSimulation} type="button">{loading === 'batch' ? 'Running batch…' : 'Run Batch Simulation'}</button>
+          <button className="primary-button" disabled={loading !== null || profiles.length < 2 || sameProfileSelected} onClick={runBatchSimulation} type="button">{loading === 'batch' ? 'Running batch…' : 'Run Batch Simulation'}</button>
           {batchResult && (
             <>
               <div className="ratings-grid">

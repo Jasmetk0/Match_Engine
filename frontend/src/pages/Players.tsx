@@ -251,7 +251,11 @@ function ProfileEditor({ profile, onSave, onDelete, onDuplicate }: { profile: Se
   return (
     <form className="editor-card" onSubmit={submit}>
       <div className="section-heading">
-        <div><p className="eyebrow">Season profile</p><h2>{profile.season_year ?? 'New season'}</h2></div>
+        <div>
+          <p className="eyebrow">Season profile</p>
+          <h2>{profile.season_year ?? 'New season'}</h2>
+          <p>Attributes are 0–100. Elite world-class players usually sit 85–98 in their strengths.</p>
+        </div>
         <div className="button-row"><button className="primary-button" type="submit">Save profile</button>{onDelete && <button className="danger-button" onClick={onDelete} type="button">Delete</button>}</div>
       </div>
 

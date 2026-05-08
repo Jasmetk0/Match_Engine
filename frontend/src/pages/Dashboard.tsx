@@ -1,14 +1,32 @@
-import { useEffect, useState } from 'react';
+import { ChangeEvent, useEffect, useState } from 'react';
 
-import { exportAppData, getHealth, getSavedMatchesHealth, resetSampleData, type HealthResponse } from '../services/api';
+import {
+  backupDb,
+  clearSavedMatches,
+  exportAppData,
+  getDbInfo,
+  getHealth,
+  getSavedMatchesHealth,
+  importSavedMatches,
+  resetSampleData,
+  runSelfTest,
+  type HealthResponse,
+  type SelfTestResponse,
+} from '../services/api';
 
 type ConnectionState = 'checking' | 'connected' | 'offline';
+
+function pretty(value: unknown) {
+  return JSON.stringify(value, null, 2);
+}
 
 export function Dashboard() {
   const [connectionState, setConnectionState] = useState<ConnectionState>('checking');
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string>('');
   const [devMessage, setDevMessage] = useState<string>('');
+  const [importText, setImportText] = useState('');
+  const [selfTest, setSelfTest] = useState<SelfTestResponse | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -34,12 +52,27 @@ export function Dashboard() {
     try {
       setDevMessage(`${label}: running…`);
       const result = await action();
-      setDevMessage(`${label}: ${JSON.stringify(result)}`);
+      setDevMessage(`${label}: ${pretty(result)}`);
     } catch (err) {
       setDevMessage(`${label}: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   }
 
+  async function clearMatches() {
+    if (!confirm('Delete all saved matches? Players, season profiles, and sample players will be kept.')) return;
+    await runDevCheck(clearSavedMatches, 'Clear saved matches');
+  }
+
+  async function runDashboardSelfTest() {
+    try {
+      setDevMessage('Self-test: running…');
+      const result = await runSelfTest(false);
+      setSelfTest(result);
+      setDevMessage(`Self-test: ${result.status}`);
+    } catch (err) {
+      setDevMessage(`Self-test: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  }
 
   async function exportJson() {
     try {
@@ -59,6 +92,25 @@ export function Dashboard() {
     } catch (err) {
       setDevMessage(`Export app data JSON: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
+  }
+
+  async function handleImport() {
+    try {
+      const parsed = JSON.parse(importText);
+      const savedMatches = Array.isArray(parsed) ? parsed : parsed.saved_matches;
+      if (!Array.isArray(savedMatches)) throw new Error('JSON must be an export object with saved_matches, or a saved_matches array.');
+      await runDevCheck(() => importSavedMatches(savedMatches), 'Import saved matches JSON');
+    } catch (err) {
+      setDevMessage(`Import saved matches JSON: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  }
+
+  function loadImportFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    file.text()
+      .then(setImportText)
+      .catch((err: Error) => setDevMessage(`Read import file: ${err.message}`));
   }
 
   return (
@@ -84,6 +136,8 @@ export function Dashboard() {
           {health ? (
             <p>
               {(health.app ?? 'Squash Match Lab')} API responded with status <strong>{health.status}</strong>.
+              {health.version && <> Version <strong>{health.version}</strong>.</>}
+              {' '}Database initialized: <strong>{health.database_initialized ? 'yes' : 'no'}</strong>.
             </p>
           ) : (
             <p>
@@ -96,22 +150,80 @@ export function Dashboard() {
       </div>
 
       <div className="metric-card dev-tools-card">
-        <span>Local Dev Tools</span>
-        <strong>Test helpers</strong>
-        <p>Quick checks for the local API and seed data before a manual app test.</p>
+        <span>First Run Checklist</span>
+        <strong>Safe local test order</strong>
+        <ol className="compact-list">
+          <li>Backend connected</li>
+          <li>Saved matches router ok</li>
+          <li>Elite sample players reset</li>
+          <li>Self-test passed</li>
+          <li>Generate and save one match</li>
+        </ol>
         <div className="button-row match-actions">
-          <button className="ghost-button" onClick={() => runDevCheck(getHealth, 'Backend health')} type="button">Health check backend</button>
-          <button className="ghost-button" onClick={() => runDevCheck(getSavedMatchesHealth, 'Saved matches health')} type="button">Health check saved matches router</button>
-          <button className="ghost-button" onClick={() => runDevCheck(resetSampleData, 'Reset elite sample players')} type="button">Reset elite sample players</button>
+          <button className="ghost-button" onClick={() => runDevCheck(getHealth, 'Backend health')} type="button">1. Backend</button>
+          <button className="ghost-button" onClick={() => runDevCheck(getSavedMatchesHealth, 'Saved matches health')} type="button">2. Saved router</button>
+          <button className="ghost-button" onClick={() => runDevCheck(resetSampleData, 'Reset elite sample players')} type="button">3. Reset samples</button>
+          <button className="primary-button" onClick={runDashboardSelfTest} type="button">4. Run Self-Test</button>
+        </div>
+      </div>
+
+      <div className="metric-card dev-tools-card">
+        <span>Local Dev Tools</span>
+        <strong>Database and JSON tools</strong>
+        <p>Quick checks for the local API, SQLite backup, and saved-match portability.</p>
+        <div className="button-row match-actions">
+          <button className="ghost-button" onClick={() => runDevCheck(getDbInfo, 'DB info')} type="button">DB info</button>
+          <button className="ghost-button" onClick={() => runDevCheck(backupDb, 'Backup SQLite DB')} type="button">Backup SQLite DB</button>
+          <button className="danger-button" onClick={clearMatches} type="button">Clear saved matches</button>
           <button className="ghost-button" onClick={exportJson} type="button">Export app data JSON</button>
         </div>
-        {devMessage && <p className="dev-result">{devMessage}</p>}
+        <label className="field-label wide-field">
+          <span>Import saved matches JSON</span>
+          <input accept="application/json,.json" onChange={loadImportFile} type="file" />
+          <textarea onChange={(event) => setImportText(event.target.value)} placeholder="Paste exported JSON here. Only saved_matches will be imported." value={importText} />
+        </label>
+        <button className="primary-button" disabled={!importText.trim()} onClick={handleImport} type="button">Import Saved Matches</button>
+        {devMessage && <pre className="dev-result">{devMessage}</pre>}
       </div>
+
+      {selfTest && (
+        <div className="metric-card dev-tools-card">
+          <span>Automated smoke test</span>
+          <strong>{selfTest.status === 'ok' ? 'Passed' : 'Failed'}</strong>
+          <h3>Checks</h3>
+          <ul className="compact-list">
+            {selfTest.checks.map((check) => <li key={check.name}><strong>{check.status}</strong> · {check.name}: {check.message}</li>)}
+          </ul>
+          <h3>Sample ratings</h3>
+          <div className="scoreline-grid">
+            {Object.entries(selfTest.sample_ratings).map(([name, rating]) => <span key={name}>{name}: Tour {rating.tour} / League {rating.league}</span>)}
+          </div>
+          <h3>Generated summaries</h3>
+          <div className="scoreline-grid">
+            {Object.entries(selfTest.generated_summaries).map(([name, summary]) => <span key={name}>{summary}</span>)}
+          </div>
+        </div>
+      )}
 
       <div className="metric-card">
         <span>Database</span>
         <strong>SQLite</strong>
         <p>Local file: data/squash_engine.db</p>
+      </div>
+
+      <div className="metric-card">
+        <span>Current MVP includes</span>
+        <strong>Local squash lab</strong>
+        <ul className="compact-list">
+          <li>Players</li>
+          <li>Tour BO5</li>
+          <li>League Timed 3x5</li>
+          <li>Save Match</li>
+          <li>Analytics</li>
+          <li>Batch Simulation</li>
+          <li>Export/Backup</li>
+          <li>Self-Test</li>
+        </ul>
       </div>
 
       <div className="metric-card">

@@ -1,24 +1,28 @@
 # Squash Match Lab
 
-Squash Match Lab is a beginner-friendly local full-stack app for building a squash match simulation workspace. This first version sets up the project structure, SQLite database, FastAPI backend, React/Vite frontend, and a Dashboard that checks whether the backend is reachable.
-
-The rally-by-rally match engine is intentionally **not** implemented yet.
+Squash Match Lab is a beginner-friendly local full-stack app for a fictional world where squash is a global top-3 sport. It includes player season profiles, Tour BO5 simulation, League Timed 3x5 simulation, saved matches, analytics, batch rivalry simulation, export/backup tools, and a Dashboard self-test.
 
 ## Project structure
 
 ```text
-backend/            FastAPI app, SQLAlchemy setup, and backend requirements
+backend/            FastAPI app, SQLAlchemy models, simulation engines, API routers
 frontend/           React + TypeScript + Vite app
 data/               Local SQLite database folder
-README.md           Setup and run instructions
-run_backend.bat     Windows script for backend setup and startup
-run_frontend.bat    Windows script for frontend setup and startup
+run_backend.bat     Windows backend setup/start script
+run_frontend.bat    Windows frontend setup/start script
+run_all_hint.txt    Short first-run checklist
 ```
 
 The SQLite database is created locally at:
 
 ```text
 data/squash_engine.db
+```
+
+Backups are written to:
+
+```text
+data/backups/
 ```
 
 ## Requirements
@@ -30,26 +34,24 @@ Install these on your Windows PC before running the app:
 
 No external services are required.
 
-## Run on Windows
+## First run on Windows
 
 Open two Command Prompt or PowerShell windows from the project folder.
 
 ### 1. Start the backend
 
-In the first window, run:
-
 ```bat
 run_backend.bat
 ```
 
-This script will:
+The backend script will:
 
-1. Create `backend\.venv` if it does not already exist.
-2. Install backend Python packages from `backend\requirements.txt`.
-3. Start FastAPI with uvicorn at `http://127.0.0.1:8000`.
-4. Create the local SQLite database and tables on startup.
+1. Change into the project folder.
+2. Create `backend\.venv` if it does not already exist.
+3. Install backend packages from `backend\requirements.txt`.
+4. Start FastAPI at `http://127.0.0.1:8000`.
 
-You can check the API health endpoint at:
+Health check:
 
 ```text
 http://127.0.0.1:8000/health
@@ -57,37 +59,52 @@ http://127.0.0.1:8000/health
 
 ### 2. Start the frontend
 
-In the second window, run:
-
 ```bat
 run_frontend.bat
 ```
 
-This script will:
+The frontend script will:
 
-1. Install npm packages in `frontend\node_modules` if needed.
-2. Start the Vite development server.
+1. Change into `frontend`.
+2. Install npm packages if `node_modules` is missing.
+3. Start Vite at `http://127.0.0.1:5173`.
 
-Open the frontend in your browser at:
+### 3. Open the app
+
+Open this URL in your browser:
 
 ```text
 http://127.0.0.1:5173
 ```
 
-## What you should see
+### 4. Run the self-test
 
-The app opens to a dark sports-tech Dashboard for Squash Match Lab. The Dashboard calls the backend `/health` endpoint and shows whether the FastAPI backend is connected.
+On the Dashboard, use:
 
-Navigation placeholders are included for:
+```text
+Dashboard -> Dev Tools -> Run Self-Test
+```
 
-- Dashboard
-- Players
-- Match Lab
-- Saved Matches
+Then go to Match Lab, generate a match, and save one test match.
 
-## Local development notes
+## Current MVP includes
 
-- Backend code lives under `backend/app` and is split into API, core config, database, and model modules.
-- SQLite foreign keys are enabled for every database connection.
-- Frontend API calls are centralized in `frontend/src/services/api.ts`.
-- Authentication and match simulation logic are intentionally omitted for now.
+- Players and season profiles with 18 attributes
+- Controlled style/personality/mentality/progression dropdowns
+- Elite sample players
+- Tour BO5 match engine
+- League Timed 3x5 match engine
+- Monte Carlo previews
+- Generate / Regenerate / Randomize Seed
+- Save Match and Saved Matches page
+- Analytics, H2H analytics, player history, and saved-match leaderboard
+- Batch Simulate Rivalry
+- Export app data JSON
+- SQLite DB info, backup, clear saved matches, saved-match JSON import
+- Backend self-test
+
+## Local safety notes
+
+- Use Dashboard -> Dev Tools -> Backup SQLite DB before risky manual testing.
+- Clear saved matches deletes saved match history only. It does not delete players, season profiles, or sample players.
+- Saved-match JSON import only imports historical saved matches. It does not import players or season profiles.
