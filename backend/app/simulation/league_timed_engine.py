@@ -239,6 +239,7 @@ def _blank_stats(a: MatchPlayer, b: MatchPlayer) -> dict[str, Any]:
     return {
         "total_points": pairs.copy(), "sets_won": pairs.copy(), "games_won": pairs.copy(), "drawn_sets": 0,
         "total_scoring_rallies": 0, "total_lets": 0, "total_duration_seconds": 0.0,
+        "clean_rally_time_seconds": 0.0, "estimated_broadcast_duration_seconds": 0.0, "estimated_broadcast_duration_minutes": 0.0,
         "average_rally_shots": 0.0, "average_rally_duration_seconds": 0.0, "longest_rally_shots": 0, "longest_rally_seconds": 0.0,
         "points_per_minute": 0.0, "points_per_set": [], "final_minute_points": pairs.copy(), "final_minute_points_won": pairs.copy(),
         "points_when_trailing": pairs.copy(), "points_when_leading": pairs.copy(), "lead_changes_by_set": [], "biggest_lead_by_set": [],
@@ -347,6 +348,10 @@ def simulate_league_timed_match(a: MatchPlayer, b: MatchPlayer, seed: int, inclu
     a_sets = state.games_won[a.profile_id]; b_sets = state.games_won[b.profile_id]
     winner_id = a.profile_id if a_sets > b_sets else b.profile_id if b_sets > a_sets else None
     stats["total_duration_seconds"] = round(sum(g["duration_seconds"] for g in games), 1)
+    stats["clean_rally_time_seconds"] = stats["total_duration_seconds"]
+    broadcast_duration = stats["clean_rally_time_seconds"] + (max(len(games) - 1, 0) * 45) + 60
+    stats["estimated_broadcast_duration_seconds"] = round(broadcast_duration, 1)
+    stats["estimated_broadcast_duration_minutes"] = round(broadcast_duration / 60, 1)
     scoring_rallies = [r for r in rallies if r.get("terminal_type") != "let_replayed"]
     stats["average_rally_shots"] = round(sum(r["rally_shots"] for r in scoring_rallies) / len(scoring_rallies), 1) if scoring_rallies else 0.0
     stats["average_rally_duration_seconds"] = round(sum(r["rally_duration_seconds"] for r in scoring_rallies) / len(scoring_rallies), 1) if scoring_rallies else 0.0

@@ -617,3 +617,45 @@ button:disabled {
     position: static;
   }
 }
+
+.compact-banner {
+  margin-bottom: 1rem;
+}
+
+.diagnostics-panel {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid rgba(181, 225, 255, 0.14);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.diagnostics-panel summary {
+  cursor: pointer;
+  color: #4dffbe;
+  font-weight: 800;
+}
+
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+  color: #a9bac6;
+}
+
+.diagnostics-grid strong {
+  color: #f4fbff;
+}
+
+.saved-filter {
+  margin-top: 0.8rem;
+}
+
+.dev-tools-card {
+  grid-column: span 2;
+}
+
+.dev-result {
+  overflow-wrap: anywhere;
+}

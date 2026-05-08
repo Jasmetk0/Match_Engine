@@ -14,6 +14,7 @@ import {
   PlayerWithProfiles,
   SeasonProfile,
   SeasonProfilePayload,
+  resetSampleData,
   seedSampleData,
   updatePlayer,
   updateProfile,
@@ -33,6 +34,32 @@ const attributeGroups: { title: string; fields: (keyof PlayerAttributes)[] }[] =
     fields: ['anticipation', 'shot_selection', 'adaptability', 'composure', 'error_discipline', 'deception_creativity'],
   },
 ];
+
+
+const playStyles = [
+  'Volley Pressor', 'Relentless Retriever', 'Creative Magician', 'Tactical Controller',
+  'Power Driver', 'Pressure Defender', 'Game Reader', 'Tricky Opportunist',
+  'Aggressive Disruptor', 'Composed Controller', 'All-Rounder', 'Endurance Grinder',
+];
+
+const careerPersonalities = [
+  'Workhorse', 'Natural Talent', 'Fanatic', 'Rebel', 'Traditionalist', 'Star Chaser',
+  'Apprentice', 'Hothead', 'Stable Grinder', 'Free Spirit',
+];
+
+const matchMentalities = [
+  'Mentally Tough', 'Ice Cold', 'Comeback Fighter', 'Mentally Fragile', 'Pressure Magnet',
+  'Hothead', 'Momentum Player', 'Slow Starter', 'Front Runner',
+];
+
+const progressionTypes = [
+  'Early Bloomer', 'Standard', 'Late Bloomer', 'Long Prime', 'Flash Peak', 'Slow Burn',
+  'Junior Star Bust', 'Injury Interrupted', 'Veteran Master', 'Burnout Arc',
+];
+
+function options(values: string[]) {
+  return values.map((value) => <option key={value} value={value}>{value}</option>);
+}
 
 const defaultAttributes: PlayerAttributes = {
   serve_pressure: 50,
@@ -213,10 +240,10 @@ function ProfileEditor({ profile, onSave, onDelete, onDuplicate }: { profile: Se
       <div className="form-grid">
         <Input defaultValue={profile.season_year} label="Season year" max={2200} min={1900} name="season_year" type="number" />
         <Input defaultValue={profile.age} label="Age" name="age" type="number" />
-        <Input defaultValue={profile.play_style} label="Play style" name="play_style" />
-        <Input defaultValue={profile.career_personality} label="Career personality" name="career_personality" />
-        <Input defaultValue={profile.match_mentality} label="Match mentality" name="match_mentality" />
-        <Input defaultValue={profile.progression_type} label="Progression type" name="progression_type" />
+        <Select defaultValue={profile.play_style ?? 'All-Rounder'} label="Play style" name="play_style">{options(playStyles)}</Select>
+        <Select defaultValue={profile.career_personality ?? 'Stable Grinder'} label="Career personality" name="career_personality">{options(careerPersonalities)}</Select>
+        <Select defaultValue={profile.match_mentality ?? 'Mentally Tough'} label="Match mentality" name="match_mentality">{options(matchMentalities)}</Select>
+        <Select defaultValue={profile.progression_type ?? 'Standard'} label="Progression type" name="progression_type">{options(progressionTypes)}</Select>
         <Input defaultValue={profile.form} label="Form" max={100} min={0} name="form" type="number" />
         <Input defaultValue={profile.confidence} label="Confidence" max={100} min={0} name="confidence" type="number" />
         <Input defaultValue={profile.fatigue} label="Fatigue" max={100} min={0} name="fatigue" type="number" />
@@ -270,7 +297,11 @@ export function Players() {
     <section className="players-page">
       <div className="section-heading top-heading">
         <div><p className="eyebrow">Roster setup</p><h1>Players</h1><p>Manage stable player identities plus season-specific profiles, attributes, and derived ratings.</p></div>
-        <div className="button-row"><button className="ghost-button" onClick={() => safe(async () => { await seedSampleData(); await refresh(); })} type="button">Seed sample data</button><button className="primary-button" onClick={() => { setAdding(true); setSelected(null); }} type="button">Add Player</button></div>
+        <div className="button-row">
+          <button className="ghost-button" onClick={() => safe(async () => { await seedSampleData(); await refresh(); })} type="button">Seed sample data</button>
+          <button className="ghost-button" onClick={() => safe(async () => { const updated = await resetSampleData(); await refresh(updated[0]?.id); })} type="button">Reset elite sample players</button>
+          <button className="primary-button" onClick={() => { setAdding(true); setSelected(null); }} type="button">Add Player</button>
+        </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}

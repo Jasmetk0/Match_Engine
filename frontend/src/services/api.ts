@@ -1,6 +1,7 @@
 export type HealthResponse = {
   status: string;
-  app: string;
+  app?: string;
+  router?: string;
 };
 
 export type PlayerAttributes = {
@@ -145,6 +146,10 @@ export async function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>('/health');
 }
 
+export async function getSavedMatchesHealth(): Promise<HealthResponse> {
+  return request<HealthResponse>('/saved-matches/health');
+}
+
 export async function listPlayers(): Promise<Player[]> {
   return request<Player[]>('/players');
 }
@@ -186,6 +191,10 @@ export async function duplicateProfile(
 
 export async function seedSampleData(): Promise<Player[]> {
   return request<Player[]>('/dev/seed-sample-data', { method: 'POST' });
+}
+
+export async function resetSampleData(): Promise<Player[]> {
+  return request<Player[]>('/dev/reset-sample-data', { method: 'POST' });
 }
 
 export type MatchRequest = {

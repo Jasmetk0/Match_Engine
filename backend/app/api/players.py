@@ -94,6 +94,83 @@ def _create_profile_model(player_id: int, payload: SeasonProfileCreate) -> Playe
     return profile
 
 
+ELITE_SAMPLE_PLAYERS = [
+    (
+        PlayerCreate(name="Arebady Macky jr", nationality="Fax & Finiat", birth_year=2001, height_cm=187, weight_kg=82, handedness="right"),
+        SeasonProfileCreate(
+            season_year=2030, age=29, play_style="Volley Pressor", career_personality="Fanatic",
+            match_mentality="Mentally Tough", progression_type="Long Prime", form=88, confidence=92,
+            attributes={
+                "serve_pressure": 86, "return_initiative": 89, "length_quality": 92, "width_control": 90,
+                "volley_takeover": 97, "front_court_touch": 88, "finishing_power": 92, "first_step_cod": 96,
+                "t_recovery": 97, "aerobic_repeatability": 92, "recovery_efficiency": 95, "anticipation": 92,
+                "shot_selection": 91, "adaptability": 88, "composure": 94, "error_discipline": 90,
+                "deception_creativity": 84, "durability": 90,
+            },
+        ),
+    ),
+    (
+        PlayerCreate(name="Benjamin Paris", nationality="Francica", birth_year=2005, height_cm=181, weight_kg=76, handedness="right"),
+        SeasonProfileCreate(
+            season_year=2030, age=25, play_style="Relentless Retriever", career_personality="Workhorse",
+            match_mentality="Comeback Fighter", progression_type="Standard", form=88, confidence=90,
+            attributes={
+                "serve_pressure": 80, "return_initiative": 96, "length_quality": 94, "width_control": 91,
+                "volley_takeover": 86, "front_court_touch": 84, "finishing_power": 84, "first_step_cod": 94,
+                "t_recovery": 96, "aerobic_repeatability": 98, "recovery_efficiency": 95, "anticipation": 95,
+                "shot_selection": 92, "adaptability": 91, "composure": 95, "error_discipline": 97,
+                "deception_creativity": 78, "durability": 94,
+            },
+        ),
+    ),
+    (
+        PlayerCreate(name="Olivier da Silva", nationality="Francica", birth_year=2006, height_cm=178, weight_kg=73, handedness="left"),
+        SeasonProfileCreate(
+            season_year=2030, age=24, play_style="Creative Magician", career_personality="Natural Talent",
+            match_mentality="Ice Cold", progression_type="Flash Peak", form=90, confidence=94,
+            attributes={
+                "serve_pressure": 84, "return_initiative": 88, "length_quality": 90, "width_control": 96,
+                "volley_takeover": 91, "front_court_touch": 98, "finishing_power": 88, "first_step_cod": 92,
+                "t_recovery": 90, "aerobic_repeatability": 88, "recovery_efficiency": 90, "anticipation": 96,
+                "shot_selection": 97, "adaptability": 94, "composure": 96, "error_discipline": 88,
+                "deception_creativity": 99, "durability": 86,
+            },
+        ),
+    ),
+]
+
+
+def _upsert_elite_sample_players(db: Session) -> list[Player]:
+    updated: list[Player] = []
+    for player_payload, profile_payload in ELITE_SAMPLE_PLAYERS:
+        player = db.scalar(select(Player).where(Player.name == player_payload.name).options(selectinload(Player.profiles).selectinload(PlayerSeasonProfile.attributes)))
+        if player is None:
+            player = Player(**player_payload.model_dump())
+            db.add(player)
+            db.flush()
+        else:
+            for key, value in player_payload.model_dump().items():
+                setattr(player, key, value)
+
+        profile = next((profile for profile in player.profiles if profile.season_year == profile_payload.season_year), None)
+        if profile is None:
+            profile = _create_profile_model(player.id, profile_payload)
+            db.add(profile)
+            player.profiles.append(profile)
+        else:
+            profile_data = profile_payload.model_dump(exclude={"attributes"})
+            for key, value in profile_data.items():
+                setattr(profile, key, value)
+            if profile.attributes is None:
+                profile.attributes = PlayerAttributes()
+            for key, value in profile_payload.attributes.model_dump().items():
+                setattr(profile.attributes, key, value)
+        updated.append(player)
+    db.commit()
+    names = [payload.name for payload, _ in ELITE_SAMPLE_PLAYERS]
+    return db.scalars(select(Player).where(Player.name.in_(names)).options(selectinload(Player.profiles).selectinload(PlayerSeasonProfile.attributes))).all()
+
+
 @router.get("/players", response_model=list[PlayerRead])
 def list_players(db: Session = Depends(get_db)):
     players = db.scalars(select(Player).options(selectinload(Player.profiles).selectinload(PlayerSeasonProfile.attributes))).all()
@@ -209,71 +286,9 @@ def seed_sample_data(db: Session = Depends(get_db)):
     if db.scalar(select(func.count(Player.id))) > 0:
         players = db.scalars(select(Player).options(selectinload(Player.profiles).selectinload(PlayerSeasonProfile.attributes))).all()
         return [_player_read(player) for player in players]
+    return [_player_read(player) for player in _upsert_elite_sample_players(db)]
 
-    samples = [
-        (
-            PlayerCreate(name="Arebady Macky jr", nationality="Fax & Finiat", birth_year=2001, height_cm=187, weight_kg=82, handedness="right"),
-            SeasonProfileCreate(
-                season_year=2030,
-                age=29,
-                play_style="Volley Pressor",
-                career_personality="Fanatic",
-                match_mentality="Mentally Tough",
-                progression_type="Long Prime",
-                attributes={
-                    "volley_takeover": 93,
-                    "first_step_cod": 91,
-                    "t_recovery": 92,
-                    "recovery_efficiency": 90,
-                    "composure": 89,
-                    "finishing_power": 90,
-                },
-            ),
-        ),
-        (
-            PlayerCreate(name="Benjamin Paris", nationality="Francica", birth_year=2005, height_cm=181, weight_kg=76, handedness="right"),
-            SeasonProfileCreate(
-                season_year=2030,
-                age=25,
-                play_style="Relentless Retriever",
-                career_personality="Workhorse",
-                match_mentality="Comeback Fighter",
-                progression_type="Standard",
-                attributes={
-                    "aerobic_repeatability": 94,
-                    "t_recovery": 91,
-                    "return_initiative": 89,
-                    "error_discipline": 92,
-                    "composure": 88,
-                    "anticipation": 90,
-                },
-            ),
-        ),
-        (
-            PlayerCreate(name="Olivier da Silva", nationality="Francica", birth_year=2006, height_cm=178, weight_kg=73, handedness="left"),
-            SeasonProfileCreate(
-                season_year=2030,
-                age=24,
-                play_style="Creative Magician",
-                career_personality="Natural Talent",
-                match_mentality="Ice Cold",
-                progression_type="Flash Peak",
-                attributes={
-                    "front_court_touch": 95,
-                    "deception_creativity": 96,
-                    "shot_selection": 91,
-                    "anticipation": 90,
-                    "width_control": 89,
-                    "composure": 93,
-                },
-            ),
-        ),
-    ]
-    for player_payload, profile_payload in samples:
-        player = Player(**player_payload.model_dump())
-        db.add(player)
-        db.flush()
-        db.add(_create_profile_model(player.id, profile_payload))
-    db.commit()
-    players = db.scalars(select(Player).options(selectinload(Player.profiles).selectinload(PlayerSeasonProfile.attributes))).all()
-    return [_player_read(player) for player in players]
+
+@router.post("/dev/reset-sample-data", response_model=list[PlayerRead])
+def reset_sample_data(db: Session = Depends(get_db)):
+    return [_player_read(player) for player in _upsert_elite_sample_players(db)]

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { getHealth, type HealthResponse } from '../services/api';
+import { getHealth, getSavedMatchesHealth, resetSampleData, type HealthResponse } from '../services/api';
 
 type ConnectionState = 'checking' | 'connected' | 'offline';
 
@@ -8,6 +8,7 @@ export function Dashboard() {
   const [connectionState, setConnectionState] = useState<ConnectionState>('checking');
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string>('');
+  const [devMessage, setDevMessage] = useState<string>('');
 
   useEffect(() => {
     let isMounted = true;
@@ -29,14 +30,24 @@ export function Dashboard() {
     };
   }, []);
 
+  async function runDevCheck(action: () => Promise<unknown>, label: string) {
+    try {
+      setDevMessage(`${label}: running…`);
+      const result = await action();
+      setDevMessage(`${label}: ${JSON.stringify(result)}`);
+    } catch (err) {
+      setDevMessage(`${label}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  }
+
   return (
     <section className="dashboard-grid">
       <div className="hero-card">
         <p className="eyebrow">Local simulation workspace</p>
         <h1>Squash Match Lab</h1>
         <p>
-          Build, test, and eventually simulate realistic squash matches rally by rally. This first
-          version keeps the stack local and ready for future match-engine features.
+          Build and test realistic fictional FAX squash matches rally by rally. The workspace stays
+          local and simple for manual Windows testing.
         </p>
       </div>
 
@@ -51,7 +62,7 @@ export function Dashboard() {
           </h2>
           {health ? (
             <p>
-              {health.app} API responded with status <strong>{health.status}</strong>.
+              {(health.app ?? 'Squash Match Lab')} API responded with status <strong>{health.status}</strong>.
             </p>
           ) : (
             <p>
@@ -63,6 +74,18 @@ export function Dashboard() {
         </div>
       </div>
 
+      <div className="metric-card dev-tools-card">
+        <span>Local Dev Tools</span>
+        <strong>Test helpers</strong>
+        <p>Quick checks for the local API and seed data before a manual app test.</p>
+        <div className="button-row match-actions">
+          <button className="ghost-button" onClick={() => runDevCheck(getHealth, 'Backend health')} type="button">Health check backend</button>
+          <button className="ghost-button" onClick={() => runDevCheck(getSavedMatchesHealth, 'Saved matches health')} type="button">Health check saved matches router</button>
+          <button className="ghost-button" onClick={() => runDevCheck(resetSampleData, 'Reset elite sample players')} type="button">Reset elite sample players</button>
+        </div>
+        {devMessage && <p className="dev-result">{devMessage}</p>}
+      </div>
+
       <div className="metric-card">
         <span>Database</span>
         <strong>SQLite</strong>
@@ -70,9 +93,9 @@ export function Dashboard() {
       </div>
 
       <div className="metric-card">
-        <span>Next build step</span>
-        <strong>Match engine</strong>
-        <p>Rally-by-rally simulation will be added after this foundation.</p>
+        <span>Current engines</span>
+        <strong>Tour BO5 + League Timed 3x5</strong>
+        <p>Use elite sample players, copied JSON, diagnostics, and saved-match filters to test realism.</p>
       </div>
     </section>
   );

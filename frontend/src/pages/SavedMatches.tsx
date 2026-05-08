@@ -38,6 +38,7 @@ export function SavedMatches() {
   const [matches, setMatches] = useState<SavedMatchSummary[]>([]);
   const [selected, setSelected] = useState<SavedMatchDetail | null>(null);
   const [query, setQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'tour_bo5' | 'league_timed_3x5' | 'draws'>('all');
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState<'list' | 'detail' | 'update' | 'delete' | null>('list');
@@ -65,16 +66,22 @@ export function SavedMatches() {
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return matches;
-    return matches.filter((match) => [
-      match.title ?? generatedTitle(match),
-      match.player_a_name_snapshot,
-      match.player_b_name_snapshot,
-      match.winner_name_snapshot,
-      match.loser_name_snapshot,
-      match.match_score_text,
-    ].join(' ').toLowerCase().includes(needle));
-  }, [matches, query]);
+    return matches.filter((match) => {
+      const matchesType =
+        typeFilter === 'all' ||
+        (typeFilter === 'draws' ? isDraw(match) : match.match_type === typeFilter);
+      if (!matchesType) return false;
+      if (!needle) return true;
+      return [
+        match.title ?? generatedTitle(match),
+        match.player_a_name_snapshot,
+        match.player_b_name_snapshot,
+        match.winner_name_snapshot,
+        match.loser_name_snapshot,
+        match.match_score_text,
+      ].join(' ').toLowerCase().includes(needle);
+    });
+  }, [matches, query, typeFilter]);
 
   async function openMatch(matchId: number) {
     try {
@@ -147,6 +154,15 @@ export function SavedMatches() {
       <div className="saved-matches-layout">
         <div className="roster-card saved-list-card">
           <input className="search-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by title, player or score" />
+          <label className="field-label saved-filter">
+            <span>Filter</span>
+            <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as typeof typeFilter)}>
+              <option value="all">All match types</option>
+              <option value="tour_bo5">Tour BO5</option>
+              <option value="league_timed_3x5">League Timed 3x5</option>
+              <option value="draws">Draws only</option>
+            </select>
+          </label>
           <div className="player-table saved-match-list">
             {loading === 'list' && <div className="empty-state"><p>Loading saved matches…</p></div>}
             {!loading && filtered.length === 0 && <div className="empty-state"><p>No saved matches found.</p></div>}
@@ -186,7 +202,8 @@ export function SavedMatches() {
                 </div>
                 <div className="scoreline-grid">
                   <span>Match type: {selected.match_type}</span>
-                  <span>Duration: {minutes(selected.total_duration_seconds)}</span>
+                  <span>Clean time: {minutes(selected.result?.stats?.clean_rally_time_seconds ?? selected.total_duration_seconds)}</span>
+                  <span>Broadcast estimate: {minutes(selected.result?.stats?.estimated_broadcast_duration_seconds)}</span>
                   <span>Total points: {selected.total_points ?? '—'}</span>
                   <span>Created: {createdDate(selected.created_at)}</span>
                 </div>
