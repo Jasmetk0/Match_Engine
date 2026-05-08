@@ -19,12 +19,12 @@ const navItems: NavItem[] = [
   { key: 'saved-matches', label: 'Saved Matches' },
 ];
 
-function renderPage(activePage: PageKey) {
+function renderPage(activePage: PageKey, setActivePage: (page: PageKey) => void) {
   switch (activePage) {
     case 'players':
       return <Players />;
     case 'match-lab':
-      return <MatchLab />;
+      return <MatchLab onOpenSavedMatches={() => setActivePage('saved-matches')} />;
     case 'saved-matches':
       return <SavedMatches />;
     case 'dashboard':
@@ -61,7 +61,7 @@ export function App() {
         </nav>
       </aside>
 
-      <main className="content-panel">{renderPage(activePage)}</main>
+      <main className="content-panel">{renderPage(activePage, setActivePage)}</main>
     </div>
   );
 }

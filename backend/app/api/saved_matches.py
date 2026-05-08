@@ -3,7 +3,9 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import desc, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.dependencies import get_db
@@ -26,9 +28,19 @@ def _nested(data: dict[str, Any], key: str) -> dict[str, Any]:
 
 def _int_or_none(value: Any) -> int | None:
     try:
-        return int(value) if value is not None else None
-    except (TypeError, ValueError):
+        if value is None:
+            return None
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _seed_or_none(value: Any) -> int | None:
+    seed = _int_or_none(value)
+    if seed is None:
+        return None
+    seed = abs(seed) % (2**31 - 1)
+    return seed or 1
 
 
 def _float_or_none(value: Any) -> float | None:
@@ -49,10 +61,36 @@ def _total_points(result: dict[str, Any]) -> int | None:
     total_points = stats.get("total_points")
     if isinstance(total_points, dict):
         try:
-            return sum(int(value) for value in total_points.values())
+            return sum(int(value) for value in total_points.values() if value is not None)
         except (TypeError, ValueError):
             return None
-    return _int_or_none(total_points)
+    if total_points is not None:
+        return _int_or_none(total_points)
+    games = result.get("games")
+    if isinstance(games, list):
+        total = 0
+        for game in games:
+            if isinstance(game, dict) and isinstance(game.get("score"), list):
+                try:
+                    total += sum(int(point) for point in game["score"][:2])
+                except (TypeError, ValueError):
+                    return None
+        return total
+    return None
+
+
+def _total_duration_seconds(result: dict[str, Any]) -> float | None:
+    stats = _nested(result, "stats")
+    duration = _float_or_none(stats.get("total_duration_seconds"))
+    if duration is not None:
+        return duration
+    games = result.get("games")
+    if isinstance(games, list):
+        durations = [_float_or_none(game.get("duration_seconds")) for game in games if isinstance(game, dict)]
+        durations = [value for value in durations if value is not None]
+        if durations:
+            return round(sum(durations), 1)
+    return None
 
 
 def _season_year(result: dict[str, Any]) -> int | None:
@@ -68,6 +106,13 @@ def _json_loads(raw: str | None) -> dict[str, Any] | None:
         return None
     value = json.loads(raw)
     return value if isinstance(value, dict) else None
+
+
+def _json_dumps(value: dict[str, Any]) -> str:
+    try:
+        return json.dumps(jsonable_encoder(value), allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Payload contains data that cannot be serialized as JSON: {exc}") from exc
 
 
 def _detail(saved_match: SavedMatch) -> SavedMatchDetailRead:
@@ -97,6 +142,11 @@ def _get_saved_match(db: Session, saved_match_id: int) -> SavedMatch:
     return saved_match
 
 
+@router.get("/health")
+def saved_matches_health():
+    return {"status": "ok", "router": "saved-matches"}
+
+
 @router.post("", response_model=SavedMatchDetailRead, status_code=status.HTTP_201_CREATED)
 def create_saved_match(payload: SavedMatchCreate, db: Session = Depends(get_db)):
     result = _as_dict(payload.result, "result")
@@ -108,7 +158,7 @@ def create_saved_match(payload: SavedMatchCreate, db: Session = Depends(get_db))
     loser = {} if result.get("loser") is None else _nested(result, "loser")
     stats = _nested(result, "stats")
 
-    seed = _int_or_none(result.get("seed"))
+    seed = _seed_or_none(result.get("seed"))
     if seed is None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="result.seed is required")
 
@@ -127,14 +177,18 @@ def create_saved_match(payload: SavedMatchCreate, db: Session = Depends(get_db))
         winner_name_snapshot="Draw" if is_draw else _required_str(winner.get("name"), "Winner"),
         loser_name_snapshot="Draw" if is_draw else _required_str(loser.get("name"), "Loser"),
         match_score_text=_required_str(result.get("match_score_text"), "Score unavailable"),
-        total_duration_seconds=_float_or_none(stats.get("total_duration_seconds")),
+        total_duration_seconds=_total_duration_seconds(result),
         total_points=_total_points(result),
-        result_json=json.dumps(result),
-        preview_json=json.dumps(preview) if preview is not None else None,
+        result_json=_json_dumps(result),
+        preview_json=_json_dumps(preview) if preview is not None else None,
     )
-    db.add(saved_match)
-    db.commit()
-    db.refresh(saved_match)
+    try:
+        db.add(saved_match)
+        db.commit()
+        db.refresh(saved_match)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Could not save match: {exc.__class__.__name__}") from exc
     return _detail(saved_match)
 
 

@@ -15,11 +15,19 @@ function minutes(seconds: number | null | undefined) {
   return `${(seconds / 60).toFixed(1)} min`;
 }
 
+function isDraw(match: SavedMatchSummary) {
+  return match.winner_name_snapshot === 'Draw' && match.loser_name_snapshot === 'Draw';
+}
+
 function generatedTitle(match: SavedMatchSummary) {
-  if (match.winner_name_snapshot === 'Draw' && match.loser_name_snapshot === 'Draw') {
-    return `Draw ${match.match_score_text} · ${match.match_type}`;
+  if (isDraw(match)) {
+    return `Match drawn ${match.match_score_text} · ${match.match_type}`;
   }
   return `${match.winner_name_snapshot} def. ${match.loser_name_snapshot} ${match.match_score_text} · ${match.match_type}`;
+}
+
+function resultLine(match: SavedMatchSummary) {
+  return isDraw(match) ? `Match drawn · ${match.match_score_text}` : `Winner: ${match.winner_name_snapshot} · ${match.match_score_text}`;
 }
 
 function createdDate(value: string) {
@@ -151,7 +159,7 @@ export function SavedMatches() {
               >
                 <strong>{match.title || generatedTitle(match)}</strong>
                 <span>{match.player_a_name_snapshot} vs {match.player_b_name_snapshot}</span>
-                <span>Winner: {match.winner_name_snapshot} · {match.match_score_text}</span>
+                <span>{resultLine(match)}</span>
                 <span>{minutes(match.total_duration_seconds)} · {match.total_points ?? '—'} points · {createdDate(match.created_at)}</span>
               </button>
             ))}
@@ -171,7 +179,7 @@ export function SavedMatches() {
                 <div className="section-heading">
                   <div>
                     <p className="eyebrow">Saved match #{selected.id}</p>
-                    <h2>{selected.winner_name_snapshot} wins {selected.match_score_text}</h2>
+                    <h2>{isDraw(selected) ? `Match drawn ${selected.match_score_text}` : `${selected.winner_name_snapshot} wins ${selected.match_score_text}`}</h2>
                     <p>{selected.player_a_name_snapshot} vs {selected.player_b_name_snapshot}</p>
                   </div>
                   <span className="seed-pill">Seed {selected.seed}</span>

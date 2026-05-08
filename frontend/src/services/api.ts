@@ -90,18 +90,48 @@ export type SeasonProfilePayload = Partial<Omit<SeasonProfile, 'id' | 'player_id
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
 
+function formatBackendDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object') {
+          const record = item as Record<string, unknown>;
+          const location = Array.isArray(record.loc) ? record.loc.join('.') : undefined;
+          return [location, record.msg].filter(Boolean).join(': ');
+        }
+        return JSON.stringify(item);
+      })
+      .join('; ');
+  }
+  if (detail && typeof detail === 'object') return JSON.stringify(detail);
+  return 'Unknown backend error';
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers ?? {}),
-    },
-    ...options,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers ?? {}),
+      },
+      ...options,
+    });
+  } catch (error) {
+    throw new Error('Network error: could not reach backend. Is run_backend.bat running?');
+  }
 
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `Backend returned ${response.status}`);
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) {
+      const body = await response.json().catch(() => null);
+      const detail = body && typeof body === 'object' && 'detail' in body ? (body as { detail: unknown }).detail : body;
+      throw new Error(`Backend returned ${response.status}: ${formatBackendDetail(detail)}`);
+    }
+    const text = await response.text();
+    throw new Error(`Backend returned ${response.status}${text ? `: ${text}` : ''}`);
   }
 
   if (response.status === 204) {
