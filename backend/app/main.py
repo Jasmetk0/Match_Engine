@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.health import router as health_router
 from app.api.match import router as match_router
 from app.api.players import router as players_router
+from app.api.saved_matches import router as saved_matches_router
 from app.db.init_db import init_db
 
 
@@ -35,3 +36,4 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(players_router)
 app.include_router(match_router)
+app.include_router(saved_matches_router)

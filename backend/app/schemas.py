@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -317,3 +317,38 @@ class MatchGenerateResponse(BaseModel):
     rallies: list[dict]
     stats: dict
     story: dict
+
+
+class SavedMatchCreate(CleanStringMixin):
+    title: str | None = None
+    notes: str | None = None
+    preview: dict[str, Any] | None = None
+    result: dict[str, Any]
+
+
+class SavedMatchUpdate(CleanStringMixin):
+    title: str | None = None
+    notes: str | None = None
+
+
+class SavedMatchSummaryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
+    title: str | None
+    match_type: str
+    seed: int
+    player_a_name_snapshot: str
+    player_b_name_snapshot: str
+    winner_name_snapshot: str
+    loser_name_snapshot: str
+    match_score_text: str
+    total_duration_seconds: float | None
+    total_points: int | None
+
+
+class SavedMatchDetailRead(SavedMatchSummaryRead):
+    notes: str | None
+    preview: dict[str, Any] | None
+    result: dict[str, Any]

@@ -255,3 +255,51 @@ export async function previewMatch(payload: MatchRequest): Promise<MatchPreviewR
 export async function generateMatch(payload: MatchRequest): Promise<MatchGenerateResponse> {
   return request<MatchGenerateResponse>('/match/generate', { method: 'POST', body: JSON.stringify(payload) });
 }
+
+export type SavedMatchSummary = {
+  id: number;
+  created_at: string;
+  title: string | null;
+  match_type: string;
+  seed: number;
+  player_a_name_snapshot: string;
+  player_b_name_snapshot: string;
+  winner_name_snapshot: string;
+  loser_name_snapshot: string;
+  match_score_text: string;
+  total_duration_seconds: number | null;
+  total_points: number | null;
+};
+
+export type SavedMatchDetail = SavedMatchSummary & {
+  notes: string | null;
+  preview: MatchPreviewResponse | Record<string, any> | null;
+  result: MatchGenerateResponse;
+};
+
+export type SavedMatchPayload = {
+  title?: string | null;
+  notes?: string | null;
+  preview?: MatchPreviewResponse | null;
+  result: MatchGenerateResponse;
+};
+
+export async function saveMatch(payload: SavedMatchPayload): Promise<SavedMatchDetail> {
+  return request<SavedMatchDetail>('/saved-matches', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function listSavedMatches(): Promise<SavedMatchSummary[]> {
+  return request<SavedMatchSummary[]>('/saved-matches');
+}
+
+export async function getSavedMatch(savedMatchId: number): Promise<SavedMatchDetail> {
+  return request<SavedMatchDetail>(`/saved-matches/${savedMatchId}`);
+}
+
+export async function updateSavedMatch(savedMatchId: number, payload: { title?: string | null; notes?: string | null }): Promise<SavedMatchDetail> {
+  return request<SavedMatchDetail>(`/saved-matches/${savedMatchId}`, { method: 'PUT', body: JSON.stringify(payload) });
+}
+
+export async function deleteSavedMatch(savedMatchId: number): Promise<void> {
+  return request<void>(`/saved-matches/${savedMatchId}`, { method: 'DELETE' });
+}

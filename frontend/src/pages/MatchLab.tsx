@@ -7,8 +7,10 @@ import {
   MatchGenerateResponse,
   MatchPreviewResponse,
   previewMatch,
+  saveMatch,
   SeasonProfile,
 } from '../services/api';
+import { MatchResultView } from '../components/MatchResultView';
 
 type ProfileOption = SeasonProfile & { playerName: string };
 
@@ -24,11 +26,6 @@ function profileLabel(profile: ProfileOption) {
   return `${profile.playerName} · ${profile.season_year} · Tour ${profile.tournament_rating.toFixed(1)} / League ${profile.league_rating.toFixed(1)}`;
 }
 
-function profileName(id: number | null, profiles: ProfileOption[]) {
-  if (id === null) return 'Let';
-  return profiles.find((profile) => profile.id === id)?.playerName ?? `Profile ${id}`;
-}
-
 export function MatchLab() {
   const [profiles, setProfiles] = useState<ProfileOption[]>([]);
   const [playerAProfileId, setPlayerAProfileId] = useState<number | ''>('');
@@ -37,8 +34,11 @@ export function MatchLab() {
   const [runs, setRuns] = useState(500);
   const [preview, setPreview] = useState<MatchPreviewResponse | null>(null);
   const [result, setResult] = useState<MatchGenerateResponse | null>(null);
-  const [loading, setLoading] = useState<'profiles' | 'preview' | 'generate' | null>('profiles');
+  const [loading, setLoading] = useState<'profiles' | 'preview' | 'generate' | 'save' | null>('profiles');
   const [error, setError] = useState<string | null>(null);
+  const [saveTitle, setSaveTitle] = useState('');
+  const [saveNotes, setSaveNotes] = useState('');
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadProfiles() {
@@ -86,11 +86,39 @@ export function MatchLab() {
     }
   }
 
+
+  function autoTitle(match: MatchGenerateResponse) {
+    return `${match.winner.name} def. ${match.loser.name} ${match.match_score_text.split(' ')[0]} · ${match.player_a.season_year} Tour BO5`;
+  }
+
+  async function saveGeneratedMatch() {
+    if (!result) return;
+    try {
+      setError(null);
+      setSaveMessage(null);
+      setLoading('save');
+      const saved = await saveMatch({
+        title: saveTitle.trim() || autoTitle(result),
+        notes: saveNotes,
+        preview,
+        result,
+      });
+      setSaveMessage(`Saved match #${saved.id}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save match');
+    } finally {
+      setLoading(null);
+    }
+  }
+
   async function generate() {
     try {
       setError(null);
       setLoading('generate');
-      setResult(await generateMatch(requestPayload()));
+      const generated = await generateMatch(requestPayload());
+      setResult(generated);
+      setSaveTitle(autoTitle(generated));
+      setSaveMessage(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not generate match');
     } finally {
@@ -146,7 +174,7 @@ export function MatchLab() {
           <button className="ghost-button" disabled={loading !== null || profiles.length < 2} onClick={generate} type="button">
             {loading === 'generate' ? 'Generating…' : 'Generate Match'}
           </button>
-          <button className="ghost-button" disabled type="button">Save Match · Coming next</button>
+          <button className="ghost-button" disabled={!result} type="button" onClick={() => document.getElementById('save-match-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>Save Match</button>
         </div>
       </div>
 
@@ -199,68 +227,34 @@ export function MatchLab() {
       )}
 
       {result && (
-        <div className="detail-stack generated-result">
-          <div className="editor-card">
+        <>
+          <div className="editor-card save-match-panel" id="save-match-panel">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">Generated result</p>
-                <h2>{result.winner.name} wins {result.match_score_text}</h2>
+                <p className="eyebrow">Save this simulation</p>
+                <h2>Save Match</h2>
+                <p>Store the generated result, story, stats and rally log exactly as shown below.</p>
               </div>
-              <span className="seed-pill">Seed {result.seed}</span>
+              {saveMessage && <span className="seed-pill">{saveMessage}</span>}
             </div>
-            <div className="scoreline-grid game-score-grid">
-              {result.games.map((game) => <span key={game.game_number}>Game {game.game_number}: {game.score[0]}-{game.score[1]} · {profileName(game.winner_profile_id, profiles)}</span>)}
+            <div className="form-grid save-form-grid">
+              <label className="field-label">
+                <span>Title</span>
+                <input value={saveTitle} onChange={(event) => setSaveTitle(event.target.value)} placeholder={autoTitle(result)} />
+              </label>
+              <label className="field-label wide-field">
+                <span>Notes</span>
+                <textarea value={saveNotes} onChange={(event) => setSaveNotes(event.target.value)} placeholder="Optional notes about the match" />
+              </label>
             </div>
-            <div className="ratings-grid">
-              <div className="rating-card"><span>Duration</span><strong>{minutes(result.stats.total_duration_seconds)}</strong></div>
-              <div className="rating-card"><span>Total points</span><strong>{Object.values(result.stats.total_points).reduce((sum: number, value) => sum + Number(value), 0)}</strong></div>
-              <div className="rating-card"><span>Avg rally shots</span><strong>{result.stats.average_rally_shots}</strong></div>
-              <div className="rating-card"><span>Longest rally</span><strong>{result.stats.longest_rally_shots}</strong></div>
-              <div className="rating-card"><span>Winners</span><strong>{Object.values(result.stats.winners).join(' / ')}</strong></div>
-              <div className="rating-card"><span>Unforced errors</span><strong>{Object.values(result.stats.unforced_errors_committed).join(' / ')}</strong></div>
-              <div className="rating-card"><span>Pressure points</span><strong>{Object.values(result.stats.pressure_points_won).join(' / ')}</strong></div>
-              <div className="rating-card"><span>Lets</span><strong>{result.stats.total_lets}</strong></div>
-            </div>
-            <div className="story-box">
-              <h3>{result.story.headline}</h3>
-              <p>{result.story.key_factor}</p>
-              <p>{result.story.turning_point}</p>
-              <p>{result.story.style_summary}</p>
-              <p>{result.story.fatigue_summary}</p>
-              <p>{result.story.pressure_summary}</p>
-              <p>{result.story.explanation}</p>
+            <div className="button-row match-actions">
+              <button className="primary-button" disabled={loading !== null} onClick={saveGeneratedMatch} type="button">
+                {loading === 'save' ? 'Saving…' : 'Save Match'}
+              </button>
             </div>
           </div>
-
-          <details className="editor-card rally-log" open>
-            <summary>Full rally log ({result.rallies.length} events)</summary>
-            <div className="rally-table-wrap">
-              <table className="rally-table">
-                <thead>
-                  <tr>
-                    <th>Game</th><th>Rally</th><th>Before</th><th>Winner</th><th>Shots</th><th>Duration</th><th>Terminal</th><th>Pattern</th><th>Pressure</th><th>Explanation</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.rallies.map((rally) => (
-                    <tr key={`${rally.game_number}-${rally.rally_number}-${rally.terminal_type}`}>
-                      <td>{rally.game_number}</td>
-                      <td>{rally.rally_number}</td>
-                      <td>{rally.score_before.join('-')}</td>
-                      <td>{profileName(rally.winner_profile_id, profiles)}</td>
-                      <td>{rally.rally_shots}</td>
-                      <td>{rally.rally_duration_seconds.toFixed(1)}s</td>
-                      <td>{rally.terminal_type}</td>
-                      <td>{rally.tactical_pattern}</td>
-                      <td>{rally.pressure_level}</td>
-                      <td>{rally.explanation}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
-        </div>
+          <MatchResultView result={result} label="Generated result" />
+        </>
       )}
     </section>
   );
