@@ -2,6 +2,8 @@ export type HealthResponse = {
   status: string;
   app?: string;
   router?: string;
+  version?: string;
+  database_initialized?: boolean;
 };
 
 export type PlayerAttributes = {
@@ -494,4 +496,48 @@ export async function batchSimulateMatch(payload: { player_a_profile_id: number;
 
 export async function exportAppData(): Promise<Record<string, any>> {
   return request<Record<string, any>>('/dev/export-data');
+}
+
+export type DbInfoResponse = {
+  status: string;
+  database_path: string;
+  player_count: number;
+  season_profile_count: number;
+  saved_match_count: number;
+  earliest_saved_match_created_at: string | null;
+  latest_saved_match_created_at: string | null;
+  available_match_types: string[];
+  app_version?: string;
+  schema_version?: string;
+};
+
+export type BackupDbResponse = { status: string; backup_path: string; size_bytes: number };
+export type ClearSavedMatchesResponse = { deleted_count: number; remaining_saved_match_count: number };
+export type ImportSavedMatchesResponse = { imported_count: number; skipped_duplicates: number; errors: string[] };
+export type SelfTestResponse = {
+  status: 'ok' | 'failed';
+  checks: { name: string; status: string; message: string }[];
+  sample_ratings: Record<string, { tour: number; league: number }>;
+  generated_summaries: Record<string, string>;
+  errors: string[];
+};
+
+export async function getDbInfo(): Promise<DbInfoResponse> {
+  return request<DbInfoResponse>('/dev/db-info');
+}
+
+export async function backupDb(): Promise<BackupDbResponse> {
+  return request<BackupDbResponse>('/dev/backup-db', { method: 'POST' });
+}
+
+export async function clearSavedMatches(): Promise<ClearSavedMatchesResponse> {
+  return request<ClearSavedMatchesResponse>('/dev/clear-saved-matches', { method: 'POST' });
+}
+
+export async function importSavedMatches(savedMatches: unknown[]): Promise<ImportSavedMatchesResponse> {
+  return request<ImportSavedMatchesResponse>('/dev/import-saved-matches', { method: 'POST', body: JSON.stringify({ saved_matches: savedMatches }) });
+}
+
+export async function runSelfTest(saveTestMatches = false): Promise<SelfTestResponse> {
+  return request<SelfTestResponse>('/dev/self-test', { method: 'POST', body: JSON.stringify({ save_test_matches: saveTestMatches }) });
 }

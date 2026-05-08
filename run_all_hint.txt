@@ -1,0 +1,20 @@
+Squash Match Lab first local run
+================================
+
+1. Double-click or run: run_backend.bat
+   Backend URL: http://127.0.0.1:8000
+
+2. In a second terminal, double-click or run: run_frontend.bat
+   Frontend URL: http://127.0.0.1:5173
+
+3. Open the frontend URL in your browser.
+
+4. On the Dashboard, use:
+   Dev Tools -> Run Self-Test
+
+5. Then go to Match Lab, generate a match, and save one test match.
+
+Notes:
+- The SQLite database stays local at data/squash_engine.db.
+- Use Dashboard -> Dev Tools -> Backup SQLite DB before risky testing.
+- Clear saved matches deletes saved match history only; it keeps players and season profiles.
