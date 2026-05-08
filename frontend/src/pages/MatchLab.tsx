@@ -28,7 +28,17 @@ function profileLabel(profile: ProfileOption) {
   return `${profile.playerName} · ${profile.season_year} · Tour ${profile.tournament_rating.toFixed(1)} / League ${profile.league_rating.toFixed(1)}`;
 }
 
-export function MatchLab() {
+function randomSeed() {
+  const values = new Uint32Array(1);
+  crypto.getRandomValues(values);
+  return `sml-${Date.now()}-${values[0] % 1_000_000}`;
+}
+
+type MatchLabProps = {
+  onOpenSavedMatches?: () => void;
+};
+
+export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
   const [profiles, setProfiles] = useState<ProfileOption[]>([]);
   const [playerAProfileId, setPlayerAProfileId] = useState<number | ''>('');
   const [playerBProfileId, setPlayerBProfileId] = useState<number | ''>('');
@@ -65,13 +75,21 @@ export function MatchLab() {
   const selectedA = useMemo(() => profiles.find((profile) => profile.id === playerAProfileId), [profiles, playerAProfileId]);
   const selectedB = useMemo(() => profiles.find((profile) => profile.id === playerBProfileId), [profiles, playerBProfileId]);
 
-  function requestPayload() {
+  function clearGeneratedState() {
+    setPreview(null);
+    setResult(null);
+    setSaveMessage(null);
+    setSaveTitle('');
+    setSaveNotes('');
+  }
+
+  function requestPayload(seedOverride?: string) {
     if (!playerAProfileId || !playerBProfileId) throw new Error('Choose two season profiles first.');
     if (playerAProfileId === playerBProfileId) throw new Error('Choose two different season profiles.');
     return {
       player_a_profile_id: playerAProfileId,
       player_b_profile_id: playerBProfileId,
-      seed: seed || null,
+      seed: (seedOverride ?? seed) || null,
       match_type: matchType,
       monte_carlo_runs: runs,
     };
@@ -109,25 +127,43 @@ export function MatchLab() {
       });
       setSaveMessage(`Saved match #${saved.id}.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save match');
+      if (err instanceof Error && err.message.startsWith('Network error:')) {
+        setError('Could not reach backend. Is run_backend.bat still running?');
+      } else {
+        setError(err instanceof Error ? err.message : 'Could not save match');
+      }
     } finally {
       setLoading(null);
     }
   }
 
-  async function generate() {
+  function randomizeSeed() {
+    setSeed(randomSeed());
+    clearGeneratedState();
+    setError(null);
+  }
+
+  async function generate(seedOverride?: string) {
     try {
       setError(null);
+      if (seedOverride !== undefined) setPreview(null);
       setLoading('generate');
-      const generated = await generateMatch(requestPayload());
+      const generated = await generateMatch(requestPayload(seedOverride));
       setResult(generated);
       setSaveTitle(autoTitle(generated));
       setSaveMessage(null);
+      setSaveNotes('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not generate match');
     } finally {
       setLoading(null);
     }
+  }
+
+  async function regenerate() {
+    const nextSeed = randomSeed();
+    setSeed(nextSeed);
+    await generate(nextSeed);
   }
 
   return (
@@ -146,26 +182,27 @@ export function MatchLab() {
         <div className="form-grid">
           <label className="field-label">
             <span>Match type</span>
-            <select value={matchType} onChange={(event) => { setMatchType(event.target.value as 'tour_bo5' | 'league_timed_3x5'); setPreview(null); setResult(null); }}>
+            <select value={matchType} onChange={(event) => { setMatchType(event.target.value as 'tour_bo5' | 'league_timed_3x5'); clearGeneratedState(); }}>
               <option value="tour_bo5">Tour BO5 · PAR to 11</option>
               <option value="league_timed_3x5">League Timed 3x5 · fixed clock</option>
             </select>
           </label>
           <label className="field-label">
             <span>Player A season profile</span>
-            <select value={playerAProfileId} onChange={(event) => setPlayerAProfileId(Number(event.target.value))}>
+            <select value={playerAProfileId} onChange={(event) => { setPlayerAProfileId(Number(event.target.value)); clearGeneratedState(); }}>
               {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profileLabel(profile)}</option>)}
             </select>
           </label>
           <label className="field-label">
             <span>Player B season profile</span>
-            <select value={playerBProfileId} onChange={(event) => setPlayerBProfileId(Number(event.target.value))}>
+            <select value={playerBProfileId} onChange={(event) => { setPlayerBProfileId(Number(event.target.value)); clearGeneratedState(); }}>
               {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profileLabel(profile)}</option>)}
             </select>
           </label>
           <label className="field-label">
             <span>Seed</span>
-            <input value={seed} onChange={(event) => setSeed(event.target.value)} placeholder="Optional deterministic seed" />
+            <input value={seed} onChange={(event) => { setSeed(event.target.value); setSaveMessage(null); }} placeholder="Optional deterministic seed" />
+            <small>Same seed = same match. Use Randomize Seed or Regenerate Match for a fresh simulation.</small>
           </label>
           <label className="field-label">
             <span>Monte Carlo runs</span>
@@ -176,8 +213,12 @@ export function MatchLab() {
           <button className="primary-button" disabled={loading !== null || profiles.length < 2} onClick={calculatePreview} type="button">
             {loading === 'preview' ? 'Calculating…' : 'Calculate Probabilities'}
           </button>
-          <button className="ghost-button" disabled={loading !== null || profiles.length < 2} onClick={generate} type="button">
+          <button className="ghost-button" disabled={loading !== null || profiles.length < 2} onClick={() => generate()} type="button">
             {loading === 'generate' ? 'Generating…' : 'Generate Match'}
+          </button>
+          <button className="ghost-button" disabled={loading !== null} onClick={randomizeSeed} type="button">Randomize Seed</button>
+          <button className="ghost-button" disabled={loading !== null || profiles.length < 2} onClick={regenerate} type="button">
+            {loading === 'generate' ? 'Regenerating…' : 'Regenerate Match'}
           </button>
           <button className="ghost-button" disabled={!result} type="button" onClick={() => document.getElementById('save-match-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>Save Match</button>
         </div>
@@ -195,7 +236,7 @@ export function MatchLab() {
         </div>
       )}
 
-      {preview && (
+      {preview && preview.match_type === matchType && preview.player_a.profile_id === playerAProfileId && preview.player_b.profile_id === playerBProfileId && (
         <div className="detail-stack">
           <div className="editor-card">
             <div className="section-heading">
@@ -282,9 +323,13 @@ export function MatchLab() {
               </label>
             </div>
             <div className="button-row match-actions">
-              <button className="primary-button" disabled={loading !== null} onClick={saveGeneratedMatch} type="button">
+              <button className="primary-button" disabled={loading !== null || !result} onClick={saveGeneratedMatch} type="button">
                 {loading === 'save' ? 'Saving…' : 'Save Match'}
               </button>
+              {saveMessage && onOpenSavedMatches && (
+                <button className="ghost-button" onClick={onOpenSavedMatches} type="button">Open Saved Matches</button>
+              )}
+              {saveMessage && !onOpenSavedMatches && <span className="seed-pill">Open the Saved Matches page to view it.</span>}
             </div>
           </div>
           <MatchResultView result={result} label="Generated result" />

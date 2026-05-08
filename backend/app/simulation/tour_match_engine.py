@@ -27,16 +27,25 @@ STYLE_EFFECTS: dict[str, dict[str, float]] = {
 INJURY_FATIGUE = {"Fresh": 0.0, "Managed": 3.0, "Worn": 7.0, "Compromised": 13.0}
 
 
+MAX_PUBLIC_SEED = 2**31 - 1
+
+
+def _fit_public_seed(value: int) -> int:
+    """Keep externally returned seeds inside SQLite/JavaScript-safe territory."""
+    value = abs(value) % MAX_PUBLIC_SEED
+    return value or 1
+
+
 def normalize_seed(seed: int | str | None) -> int:
     if seed is None or seed == "":
-        return random.SystemRandom().randint(1, 2**31 - 1)
+        return random.SystemRandom().randint(1, MAX_PUBLIC_SEED)
     if isinstance(seed, int):
-        return seed
+        return _fit_public_seed(seed)
     try:
-        return int(seed)
+        return _fit_public_seed(int(seed))
     except ValueError:
         digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
-        return int(digest, 16)
+        return _fit_public_seed(int(digest, 16))
 
 
 def child_seed(seed: int, index: int) -> int:
