@@ -34,7 +34,7 @@ function createdDate(value: string) {
   return new Date(value).toLocaleString();
 }
 
-export function SavedMatches() {
+export function SavedMatches({ onOpenAnalytics }: { onOpenAnalytics?: () => void }) {
   const [matches, setMatches] = useState<SavedMatchSummary[]>([]);
   const [selected, setSelected] = useState<SavedMatchDetail | null>(null);
   const [query, setQuery] = useState('');
@@ -175,7 +175,7 @@ export function SavedMatches() {
               >
                 <strong>{match.title || generatedTitle(match)}</strong>
                 <span>{match.player_a_name_snapshot} vs {match.player_b_name_snapshot}</span>
-                <span>{resultLine(match)}</span>
+                <span><span className="match-type-pill">{match.match_type === 'league_timed_3x5' ? 'League Timed 3x5' : 'Tour BO5'}</span> {resultLine(match)}</span>
                 <span>{minutes(match.total_duration_seconds)} · {match.total_points ?? '—'} points · {createdDate(match.created_at)}</span>
               </button>
             ))}
@@ -218,6 +218,9 @@ export function SavedMatches() {
                   </label>
                 </div>
                 <div className="button-row match-actions">
+                  <button className="ghost-button" onClick={() => { navigator.clipboard?.writeText(selected.player_a_name_snapshot); onOpenAnalytics?.(); }} type="button">View Player A Analytics</button>
+                  <button className="ghost-button" onClick={() => { navigator.clipboard?.writeText(selected.player_b_name_snapshot); onOpenAnalytics?.(); }} type="button">View Player B Analytics</button>
+                  <button className="ghost-button" onClick={() => { navigator.clipboard?.writeText(`${selected.player_a_name_snapshot} vs ${selected.player_b_name_snapshot}`); onOpenAnalytics?.(); }} type="button">View H2H</button>
                   <button className="primary-button" disabled={loading !== null} onClick={saveMeta} type="button">
                     {loading === 'update' ? 'Saving…' : 'Save Title/Notes'}
                   </button>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { getHealth, getSavedMatchesHealth, resetSampleData, type HealthResponse } from '../services/api';
+import { exportAppData, getHealth, getSavedMatchesHealth, resetSampleData, type HealthResponse } from '../services/api';
 
 type ConnectionState = 'checking' | 'connected' | 'offline';
 
@@ -37,6 +37,27 @@ export function Dashboard() {
       setDevMessage(`${label}: ${JSON.stringify(result)}`);
     } catch (err) {
       setDevMessage(`${label}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  }
+
+
+  async function exportJson() {
+    try {
+      setDevMessage('Export app data JSON: running…');
+      const data = await exportAppData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `squash-match-lab-export-${stamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setDevMessage(`Export app data JSON: downloaded ${link.download}`);
+    } catch (err) {
+      setDevMessage(`Export app data JSON: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   }
 
@@ -82,6 +103,7 @@ export function Dashboard() {
           <button className="ghost-button" onClick={() => runDevCheck(getHealth, 'Backend health')} type="button">Health check backend</button>
           <button className="ghost-button" onClick={() => runDevCheck(getSavedMatchesHealth, 'Saved matches health')} type="button">Health check saved matches router</button>
           <button className="ghost-button" onClick={() => runDevCheck(resetSampleData, 'Reset elite sample players')} type="button">Reset elite sample players</button>
+          <button className="ghost-button" onClick={exportJson} type="button">Export app data JSON</button>
         </div>
         {devMessage && <p className="dev-result">{devMessage}</p>}
       </div>

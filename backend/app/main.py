@@ -4,6 +4,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.analytics import router as analytics_router
 from app.api.health import router as health_router
 from app.api.match import router as match_router
 from app.api.players import router as players_router
@@ -37,3 +38,4 @@ app.include_router(health_router)
 app.include_router(players_router)
 app.include_router(match_router)
 app.include_router(saved_matches_router)
+app.include_router(analytics_router)

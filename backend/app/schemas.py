@@ -275,6 +275,21 @@ class MatchGenerateRequest(MatchBaseRequest):
     monte_carlo_runs: int = Field(default=500, ge=50, le=3000)
 
 
+class MatchBatchRequest(BaseModel):
+    player_a_profile_id: int
+    player_b_profile_id: int
+    seed: SeedValue = None
+    match_type: str = "tour_bo5"
+    runs: int = Field(default=20, ge=5, le=200)
+
+    @field_validator("match_type")
+    @classmethod
+    def supported_match_type(cls, value: str) -> str:
+        if value not in {"tour_bo5", "league_timed_3x5"}:
+            raise ValueError("match_type must be tour_bo5 or league_timed_3x5")
+        return value
+
+
 class MatchPreviewResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 

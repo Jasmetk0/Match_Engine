@@ -1,3 +1,6 @@
+import json
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -5,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.db.dependencies import get_db
 from app.models.player import Player, PlayerAttributes, PlayerSeasonProfile
+from app.models.saved_match import SavedMatch
 from app.ratings import calculate_derived_ratings
 from app.schemas import (
     ATTRIBUTE_FIELDS,
@@ -292,3 +296,45 @@ def seed_sample_data(db: Session = Depends(get_db)):
 @router.post("/dev/reset-sample-data", response_model=list[PlayerRead])
 def reset_sample_data(db: Session = Depends(get_db)):
     return [_player_read(player) for player in _upsert_elite_sample_players(db)]
+
+
+@router.get("/dev/export-data")
+def export_data(db: Session = Depends(get_db)):
+    players = db.scalars(select(Player).options(selectinload(Player.profiles).selectinload(PlayerSeasonProfile.attributes))).all()
+    saved_matches = db.scalars(select(SavedMatch).order_by(SavedMatch.id)).all()
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "schema_note": "Local Squash Match Lab JSON export. Import is intentionally not implemented yet.",
+        "players": [_player_read(player).model_dump(mode="json") for player in players],
+        "season_profiles": [
+            {"player_name": player.name, **_profile_read(profile).model_dump(mode="json")}
+            for player in players
+            for profile in player.profiles
+        ],
+        "saved_matches": [
+            {
+                "id": match.id,
+                "created_at": match.created_at.isoformat() if match.created_at else None,
+                "updated_at": match.updated_at.isoformat() if match.updated_at else None,
+                "title": match.title,
+                "notes": match.notes,
+                "match_type": match.match_type,
+                "season_year": match.season_year,
+                "seed": match.seed,
+                "player_a_profile_id": match.player_a_profile_id,
+                "player_b_profile_id": match.player_b_profile_id,
+                "winner_profile_id": match.winner_profile_id,
+                "loser_profile_id": match.loser_profile_id,
+                "player_a_name_snapshot": match.player_a_name_snapshot,
+                "player_b_name_snapshot": match.player_b_name_snapshot,
+                "winner_name_snapshot": match.winner_name_snapshot,
+                "loser_name_snapshot": match.loser_name_snapshot,
+                "match_score_text": match.match_score_text,
+                "total_duration_seconds": match.total_duration_seconds,
+                "total_points": match.total_points,
+                "result": json.loads(match.result_json) if match.result_json else None,
+                "preview": json.loads(match.preview_json) if match.preview_json else None,
+            }
+            for match in saved_matches
+        ],
+    }
