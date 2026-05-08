@@ -229,7 +229,7 @@ function ProfileEditor({ profile, onSave, onDelete, onDuplicate }: { profile: Se
         <div className="attribute-group" key={group.title}>
           <h3>{group.title}</h3>
           <div className="form-grid compact-grid">
-            {group.fields.map((field) => <Input defaultValue={attributes[field]} key={field} label={field.replaceAll('_', ' ')} max={100} min={0} name={field} type="number" />)}
+            {group.fields.map((field) => <Input defaultValue={attributes[field]} key={field} label={field.replace(/_/g, ' ')} max={100} min={0} name={field} type="number" />)}
           </div>
         </div>
       ))}

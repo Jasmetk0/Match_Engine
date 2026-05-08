@@ -5,7 +5,7 @@ from app.db.base import Base
 from app.db.session import engine
 
 # Import models here so SQLAlchemy registers them before create_all.
-from app.models import player  # noqa: F401
+from app.models import player, saved_match  # noqa: F401
 
 
 def _migrate_minimal_player_table() -> None:
