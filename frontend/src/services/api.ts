@@ -157,3 +157,101 @@ export async function duplicateProfile(
 export async function seedSampleData(): Promise<Player[]> {
   return request<Player[]>('/dev/seed-sample-data', { method: 'POST' });
 }
+
+export type MatchRequest = {
+  player_a_profile_id: number;
+  player_b_profile_id: number;
+  seed?: number | string | null;
+  match_type?: 'tour_bo5';
+  monte_carlo_runs?: number;
+};
+
+export type MatchPlayerSummary = {
+  profile_id: number;
+  player_id: number;
+  name: string;
+  season_year: number;
+  play_style: string;
+  tournament_rating: number;
+  league_rating: number;
+  physical_rating: number;
+  mental_rating: number;
+};
+
+export type MatchPreviewResponse = {
+  match_type: string;
+  seed: number;
+  monte_carlo_runs: number;
+  player_a: MatchPlayerSummary;
+  player_b: MatchPlayerSummary;
+  player_a_win_probability: number;
+  player_b_win_probability: number;
+  player_a_3_0: number;
+  player_a_3_1: number;
+  player_a_3_2: number;
+  player_b_3_0: number;
+  player_b_3_1: number;
+  player_b_3_2: number;
+  deciding_game_probability: number;
+  at_least_one_tiebreak_probability: number;
+  expected_total_points: number;
+  expected_total_duration_seconds: number;
+  expected_total_rallies: number;
+  expected_average_rally_shots: number;
+  upset_hint: string;
+  style_edge_summary: string;
+  physical_edge_summary: string;
+  pressure_edge_summary: string;
+};
+
+export type RallyEvent = {
+  rally_number: number;
+  game_number: number;
+  server_profile_id: number;
+  winner_profile_id: number | null;
+  loser_profile_id: number | null;
+  score_before: [number, number];
+  score_after: [number, number];
+  rally_shots: number;
+  rally_duration_seconds: number;
+  rally_length_type: string;
+  terminal_type: string;
+  tactical_pattern: string;
+  pressure_level: string;
+  initiative_player_profile_id: number;
+  t_control_player_profile_id: number;
+  fatigue_after: { player_a: number; player_b: number };
+  explanation: string;
+};
+
+export type GameSummary = {
+  game_number: number;
+  score: [number, number];
+  winner_profile_id: number;
+  duration_seconds: number;
+  scoring_rallies: number;
+  lets: number;
+  tiebreak?: boolean;
+};
+
+export type MatchGenerateResponse = {
+  match_type: string;
+  seed: number;
+  player_a: MatchPlayerSummary;
+  player_b: MatchPlayerSummary;
+  winner: MatchPlayerSummary;
+  loser: MatchPlayerSummary;
+  match_score_text: string;
+  games: GameSummary[];
+  rallies: RallyEvent[];
+  stats: Record<string, any>;
+  story: Record<string, string>;
+};
+
+export async function previewMatch(payload: MatchRequest): Promise<MatchPreviewResponse> {
+  return request<MatchPreviewResponse>('/match/preview', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function generateMatch(payload: MatchRequest): Promise<MatchGenerateResponse> {
+  return request<MatchGenerateResponse>('/match/generate', { method: 'POST', body: JSON.stringify(payload) });
+}
