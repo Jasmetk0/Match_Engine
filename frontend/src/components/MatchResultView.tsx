@@ -54,9 +54,13 @@ export function MatchResultView({ result, label = 'Match result', defaultRallyOp
   const loserRating = result.loser ? stats.performance_rating?.[String(result.loser.profile_id)] : undefined;
 
   async function copyMatchJson() {
-    await navigator.clipboard.writeText(JSON.stringify(result, null, 2));
-    setCopyMessage('Match JSON copied.');
-    window.setTimeout(() => setCopyMessage(null), 2200);
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(result, null, 2));
+      setCopyMessage('Match JSON copied.');
+    } catch (error) {
+      setCopyMessage('Could not copy JSON automatically. Browser clipboard permissions may be blocked.');
+    }
+    window.setTimeout(() => setCopyMessage(null), 3000);
   }
 
   return (

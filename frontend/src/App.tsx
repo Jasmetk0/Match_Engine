@@ -1,11 +1,12 @@
 import { useState } from 'react';
 
+import { Analytics } from './pages/Analytics';
 import { Dashboard } from './pages/Dashboard';
 import { MatchLab } from './pages/MatchLab';
 import { Players } from './pages/Players';
 import { SavedMatches } from './pages/SavedMatches';
 
-type PageKey = 'dashboard' | 'players' | 'match-lab' | 'saved-matches';
+type PageKey = 'dashboard' | 'players' | 'match-lab' | 'saved-matches' | 'analytics';
 
 type NavItem = {
   key: PageKey;
@@ -17,6 +18,7 @@ const navItems: NavItem[] = [
   { key: 'players', label: 'Players' },
   { key: 'match-lab', label: 'Match Lab' },
   { key: 'saved-matches', label: 'Saved Matches' },
+  { key: 'analytics', label: 'Analytics' },
 ];
 
 function renderPage(activePage: PageKey, setActivePage: (page: PageKey) => void) {
@@ -26,7 +28,9 @@ function renderPage(activePage: PageKey, setActivePage: (page: PageKey) => void)
     case 'match-lab':
       return <MatchLab onOpenSavedMatches={() => setActivePage('saved-matches')} />;
     case 'saved-matches':
-      return <SavedMatches />;
+      return <SavedMatches onOpenAnalytics={() => setActivePage('analytics')} />;
+    case 'analytics':
+      return <Analytics />;
     case 'dashboard':
     default:
       return <Dashboard />;

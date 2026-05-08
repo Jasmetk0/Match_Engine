@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import {
+  batchSimulateMatch,
   generateMatch,
   getPlayer,
   listPlayers,
   MatchGenerateResponse,
   MatchPreviewResponse,
+  BatchMatchResponse,
   previewMatch,
   saveMatch,
   SeasonProfile,
@@ -47,11 +49,13 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
   const [matchType, setMatchType] = useState<'tour_bo5' | 'league_timed_3x5'>('tour_bo5');
   const [preview, setPreview] = useState<MatchPreviewResponse | null>(null);
   const [result, setResult] = useState<MatchGenerateResponse | null>(null);
-  const [loading, setLoading] = useState<'profiles' | 'preview' | 'generate' | 'save' | null>('profiles');
+  const [loading, setLoading] = useState<'profiles' | 'preview' | 'generate' | 'save' | 'batch' | null>('profiles');
   const [error, setError] = useState<string | null>(null);
   const [saveTitle, setSaveTitle] = useState('');
   const [saveNotes, setSaveNotes] = useState('');
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [batchRuns, setBatchRuns] = useState(20);
+  const [batchResult, setBatchResult] = useState<BatchMatchResponse | null>(null);
 
   useEffect(() => {
     async function loadProfiles() {
@@ -81,6 +85,7 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
     setSaveMessage(null);
     setSaveTitle('');
     setSaveNotes('');
+    setBatchResult(null);
   }
 
   function requestPayload(seedOverride?: string) {
@@ -166,6 +171,26 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
     await generate(nextSeed);
   }
 
+
+  async function runBatchSimulation() {
+    try {
+      setError(null);
+      setLoading('batch');
+      const payload = requestPayload();
+      setBatchResult(await batchSimulateMatch({
+        player_a_profile_id: payload.player_a_profile_id,
+        player_b_profile_id: payload.player_b_profile_id,
+        match_type: payload.match_type,
+        seed: payload.seed,
+        runs: Math.max(5, Math.min(200, batchRuns)),
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not run batch simulation');
+    } finally {
+      setLoading(null);
+    }
+  }
+
   return (
     <section className="players-page match-lab-page">
       <div className="section-heading top-heading">
@@ -233,6 +258,40 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
               <p>Tour {profile.tournament_rating.toFixed(1)} · Mental {profile.mental_rating.toFixed(1)} · Physical {profile.physical_rating.toFixed(1)}</p>
             </div>
           ))}
+        </div>
+      )}
+
+
+      {selectedA && selectedB && (
+        <div className="editor-card batch-card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Batch Simulate Rivalry</p>
+              <h2>{selectedA.playerName} vs {selectedB.playerName}</h2>
+              <p>{matchType === 'league_timed_3x5' ? 'League Timed 3x5' : 'Tour BO5'} · base seed {seed || 'random'}. Runs are not saved and omit full rally logs for speed.</p>
+            </div>
+          </div>
+          <div className="form-grid compact-grid">
+            <label className="field-label"><span>Number of matches</span><input max={200} min={5} type="number" value={batchRuns} onChange={(event) => setBatchRuns(Number(event.target.value))} /></label>
+          </div>
+          <button className="primary-button" disabled={loading !== null || profiles.length < 2} onClick={runBatchSimulation} type="button">{loading === 'batch' ? 'Running batch…' : 'Run Batch Simulation'}</button>
+          {batchResult && (
+            <>
+              <div className="ratings-grid">
+                <div className="rating-card featured"><span>{batchResult.player_a.name}</span><strong>{batchResult.player_a_wins}</strong><p>{pct(batchResult.player_a_win_rate)} win rate</p></div>
+                <div className="rating-card featured"><span>{batchResult.player_b.name}</span><strong>{batchResult.player_b_wins}</strong><p>{pct(batchResult.player_b_win_rate)} win rate</p></div>
+                <div className="rating-card"><span>Draws</span><strong>{batchResult.draws}</strong><p>{pct(batchResult.draw_rate)} draw rate</p></div>
+                <div className="rating-card"><span>Avg points</span><strong>{batchResult.average_total_points}</strong><p>Avg rally shots {batchResult.average_rally_shots}</p></div>
+                <div className="rating-card"><span>Avg clean time</span><strong>{minutes(batchResult.average_clean_time_seconds)}</strong><p>Broadcast {minutes(batchResult.average_broadcast_time_seconds)}</p></div>
+              </div>
+              <p>{batchResult.style_summary}</p>
+              <p>{batchResult.recommendation_summary}</p>
+              <h3>Scoreline distribution</h3>
+              <div className="scoreline-grid">{Object.entries(batchResult.scoreline_distribution).map(([label, count]) => <span key={label}>{label}: {count}</span>)}</div>
+              <h3>Sample results</h3>
+              <table className="compact-table"><tbody>{batchResult.sample_results.map((sample) => <tr key={sample.seed}><td>{sample.seed}</td><td>{sample.winner_name}</td><td>{sample.score}</td><td>{sample.total_points} pts</td></tr>)}</tbody></table>
+            </>
+          )}
         </div>
       )}
 

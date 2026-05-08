@@ -365,3 +365,133 @@ export async function updateSavedMatch(savedMatchId: number, payload: { title?: 
 export async function deleteSavedMatch(savedMatchId: number): Promise<void> {
   return request<void>(`/saved-matches/${savedMatchId}`, { method: 'DELETE' });
 }
+
+export type AnalyticsMatchSummary = {
+  id: number;
+  created_at: string;
+  title: string | null;
+  match_type: string;
+  seed: number;
+  player_a_name: string;
+  player_b_name: string;
+  winner_name: string;
+  loser_name: string;
+  is_draw: boolean;
+  match_score_text: string;
+  total_points: number | null;
+  clean_rally_time_seconds: number | null;
+  estimated_broadcast_duration_seconds: number | null;
+};
+
+export type CommonOpponent = { opponent_name: string; matches: number; wins: number; losses: number; draws: number };
+
+export type PlayerAnalytics = {
+  player_name: string;
+  total_matches: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  win_rate: number;
+  tour_matches: number;
+  tour_wins: number;
+  league_matches: number;
+  league_wins: number;
+  league_draws: number;
+  total_points_for: number;
+  total_points_against: number;
+  point_differential: number;
+  average_points_for: number | null;
+  average_points_against: number | null;
+  average_clean_time_seconds: number | null;
+  average_broadcast_time_seconds: number | null;
+  common_opponents: CommonOpponent[];
+  match_type_breakdown: Record<string, { matches: number; wins: number; losses: number; draws: number }>;
+  recent_matches: AnalyticsMatchSummary[];
+  best_performance_rating: number | null;
+  average_performance_rating: number | null;
+};
+
+export type H2HAnalytics = {
+  player_a_name: string;
+  player_b_name: string;
+  match_type_filter: string;
+  total_matches: number;
+  player_a_wins: number;
+  player_b_wins: number;
+  draws: number;
+  tour_matches: number;
+  league_matches: number;
+  player_a_tour_wins: number;
+  player_b_tour_wins: number;
+  player_a_league_wins: number;
+  player_b_league_wins: number;
+  total_points_player_a: number;
+  total_points_player_b: number;
+  average_points_player_a: number | null;
+  average_points_player_b: number | null;
+  average_clean_time_seconds: number | null;
+  average_broadcast_time_seconds: number | null;
+  average_rally_shots: number | null;
+  average_rally_duration_seconds: number | null;
+  most_recent_matches: AnalyticsMatchSummary[];
+  biggest_win_summary: AnalyticsMatchSummary | null;
+  closest_match_summary: AnalyticsMatchSummary | null;
+};
+
+export type PlayerLeaderboardRow = {
+  player_name: string;
+  matches: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  win_rate: number;
+  tour_wins: number;
+  league_wins: number;
+  league_draws: number;
+  point_differential: number;
+  average_performance_rating: number | null;
+  last_played_at: string | null;
+};
+
+export type BatchMatchResponse = {
+  match_type: string;
+  runs: number;
+  base_seed: number;
+  player_a: MatchPlayerSummary;
+  player_b: MatchPlayerSummary;
+  player_a_wins: number;
+  player_b_wins: number;
+  draws: number;
+  player_a_win_rate: number;
+  player_b_win_rate: number;
+  draw_rate: number;
+  average_total_points: number;
+  average_clean_time_seconds: number;
+  average_broadcast_time_seconds: number;
+  average_rally_shots: number;
+  scoreline_distribution: Record<string, number>;
+  sample_results: { seed: number; winner_name: string; is_draw: boolean; score: string; total_points: number }[];
+  style_summary: string;
+  recommendation_summary: string;
+};
+
+export async function getPlayerAnalytics(playerName: string): Promise<PlayerAnalytics> {
+  return request<PlayerAnalytics>(`/analytics/player/${encodeURIComponent(playerName)}`);
+}
+
+export async function getH2HAnalytics(playerAName: string, playerBName: string, matchType = 'all'): Promise<H2HAnalytics> {
+  const params = new URLSearchParams({ player_a_name: playerAName, player_b_name: playerBName, match_type: matchType });
+  return request<H2HAnalytics>(`/analytics/h2h?${params.toString()}`);
+}
+
+export async function getPlayersLeaderboard(): Promise<PlayerLeaderboardRow[]> {
+  return request<PlayerLeaderboardRow[]>('/analytics/players');
+}
+
+export async function batchSimulateMatch(payload: { player_a_profile_id: number; player_b_profile_id: number; match_type: 'tour_bo5' | 'league_timed_3x5'; seed?: number | string | null; runs: number }): Promise<BatchMatchResponse> {
+  return request<BatchMatchResponse>('/match/batch', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function exportAppData(): Promise<Record<string, any>> {
+  return request<Record<string, any>>('/dev/export-data');
+}

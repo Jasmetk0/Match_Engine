@@ -7,11 +7,13 @@ import {
   deleteProfile,
   duplicateProfile,
   getPlayer,
+  getPlayerAnalytics,
   listPlayers,
   Player,
   PlayerAttributes,
   PlayerPayload,
   PlayerWithProfiles,
+  PlayerAnalytics,
   SeasonProfile,
   SeasonProfilePayload,
   resetSampleData,
@@ -137,6 +139,32 @@ function Select({ label, name, defaultValue, children }: { label: string; name: 
       <span>{label}</span>
       <select defaultValue={defaultValue} name={name}>{children}</select>
     </label>
+  );
+}
+
+
+function pct(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—';
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function SavedMatchHistoryCard({ analytics, warning }: { analytics: PlayerAnalytics | null; warning: string | null }) {
+  if (warning) return <div className="editor-card"><p className="eyebrow">Saved Match History</p><p className="warning-text">Analytics unavailable: {warning}</p></div>;
+  if (!analytics) return <div className="editor-card"><p className="eyebrow">Saved Match History</p><p>Loading saved match history…</p></div>;
+  if (analytics.total_matches === 0) return <div className="editor-card"><p className="eyebrow">Saved Match History</p><p>No saved matches yet for this player.</p></div>;
+  return (
+    <div className="editor-card compact-history-card">
+      <div className="section-heading"><div><p className="eyebrow">Saved Match History</p><h2>{analytics.wins}-{analytics.losses}-{analytics.draws} record</h2><p>{pct(analytics.win_rate)} win rate · Points {analytics.total_points_for}-{analytics.total_points_against} · Diff {analytics.point_differential}</p></div></div>
+      <div className="scoreline-grid">
+        <span>Tour: {analytics.tour_wins}-{analytics.tour_matches - analytics.tour_wins}</span>
+        <span>League: {analytics.league_wins}-{analytics.league_matches - analytics.league_wins - analytics.league_draws}-{analytics.league_draws}</span>
+        <span>Avg perf: {analytics.average_performance_rating ?? '—'}</span>
+      </div>
+      <h3>Common opponents</h3>
+      <table className="compact-table"><tbody>{analytics.common_opponents.slice(0, 5).map((opp) => <tr key={opp.opponent_name}><td>{opp.opponent_name}</td><td>{opp.matches}</td><td>{opp.wins}-{opp.losses}-{opp.draws}</td></tr>)}</tbody></table>
+      <h3>Recent saved matches</h3>
+      <ul className="compact-list">{analytics.recent_matches.slice(0, 5).map((match) => <li key={match.id}>{match.player_a_name} vs {match.player_b_name} · {match.is_draw ? 'Draw' : `${match.winner_name} won`} · {match.match_score_text}</li>)}</ul>
+    </div>
   );
 }
 
@@ -278,6 +306,8 @@ export function Players() {
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [newSeason, setNewSeason] = useState<SeasonProfilePayload | null>(null);
+  const [analytics, setAnalytics] = useState<PlayerAnalytics | null>(null);
+  const [analyticsWarning, setAnalyticsWarning] = useState<string | null>(null);
 
   async function refresh(selectedId = selected?.id) {
     const roster = await listPlayers();
@@ -286,6 +316,21 @@ export function Players() {
   }
 
   useEffect(() => { refresh(undefined).catch((err: Error) => setError(err.message)); }, []);
+
+  useEffect(() => {
+    if (!selected?.name) {
+      setAnalytics(null);
+      setAnalyticsWarning(null);
+      return;
+    }
+    let cancelled = false;
+    setAnalytics(null);
+    setAnalyticsWarning(null);
+    getPlayerAnalytics(selected.name)
+      .then((payload) => { if (!cancelled) setAnalytics(payload); })
+      .catch((err: Error) => { if (!cancelled) setAnalyticsWarning(err.message); });
+    return () => { cancelled = true; };
+  }, [selected?.name]);
 
   const filtered = useMemo(() => players.filter((player) => `${player.name} ${player.nationality}`.toLowerCase().includes(filter.toLowerCase())), [players, filter]);
 
@@ -335,6 +380,7 @@ export function Players() {
                   onSave={(payload) => safe(async () => { await updateProfile(profile.id, payload); await refresh(selected.id); })}
                 />
               ))}
+              <SavedMatchHistoryCard analytics={analytics} warning={analyticsWarning} />
             </>
           )}
 
