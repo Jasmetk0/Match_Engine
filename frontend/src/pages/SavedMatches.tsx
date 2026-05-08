@@ -16,6 +16,9 @@ function minutes(seconds: number | null | undefined) {
 }
 
 function generatedTitle(match: SavedMatchSummary) {
+  if (match.winner_name_snapshot === 'Draw' && match.loser_name_snapshot === 'Draw') {
+    return `Draw ${match.match_score_text} · ${match.match_type}`;
+  }
   return `${match.winner_name_snapshot} def. ${match.loser_name_snapshot} ${match.match_score_text} · ${match.match_type}`;
 }
 

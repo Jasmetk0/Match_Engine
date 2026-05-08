@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.dependencies import get_db
 from app.models.player import PlayerSeasonProfile
 from app.schemas import MatchGenerateRequest, MatchGenerateResponse, MatchPreviewRequest, MatchPreviewResponse
+from app.simulation.league_timed_engine import preview_league_probabilities, simulate_league_timed_match
 from app.simulation.probabilities import preview_probabilities
 from app.simulation.tour_match_engine import build_match_player, normalize_seed, simulate_tour_match
 
@@ -34,6 +35,8 @@ def _load_players(db: Session, a_id: int, b_id: int):
 def match_preview(payload: MatchPreviewRequest, db: Session = Depends(get_db)):
     a, b = _load_players(db, payload.player_a_profile_id, payload.player_b_profile_id)
     seed = normalize_seed(payload.seed)
+    if payload.match_type == "league_timed_3x5":
+        return preview_league_probabilities(a, b, seed, payload.monte_carlo_runs)
     return preview_probabilities(a, b, seed, payload.monte_carlo_runs)
 
 
@@ -41,4 +44,6 @@ def match_preview(payload: MatchPreviewRequest, db: Session = Depends(get_db)):
 def match_generate(payload: MatchGenerateRequest, db: Session = Depends(get_db)):
     a, b = _load_players(db, payload.player_a_profile_id, payload.player_b_profile_id)
     seed = normalize_seed(payload.seed)
+    if payload.match_type == "league_timed_3x5":
+        return simulate_league_timed_match(a, b, seed, include_rallies=True)
     return simulate_tour_match(a, b, seed, include_rallies=True)
