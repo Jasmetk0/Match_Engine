@@ -248,3 +248,72 @@ class PlayerWithProfilesRead(PlayerRead):
 class DuplicateProfileRequest(BaseModel):
     season_year: SeasonYear
     apply_skill_inflation: bool = True
+
+SeedValue = int | str | None
+
+
+class MatchBaseRequest(BaseModel):
+    player_a_profile_id: int
+    player_b_profile_id: int
+    seed: SeedValue = None
+    match_type: str = "tour_bo5"
+    monte_carlo_runs: int = Field(default=500, ge=50, le=3000)
+
+    @field_validator("match_type")
+    @classmethod
+    def tour_only(cls, value: str) -> str:
+        if value != "tour_bo5":
+            raise ValueError("only tour_bo5 is currently supported")
+        return value
+
+
+class MatchPreviewRequest(MatchBaseRequest):
+    pass
+
+
+class MatchGenerateRequest(MatchBaseRequest):
+    monte_carlo_runs: int = Field(default=500, ge=50, le=3000)
+
+
+class MatchPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    match_type: str
+    seed: int
+    monte_carlo_runs: int
+    player_a: dict
+    player_b: dict
+    player_a_win_probability: float
+    player_b_win_probability: float
+    player_a_3_0: float
+    player_a_3_1: float
+    player_a_3_2: float
+    player_b_3_0: float
+    player_b_3_1: float
+    player_b_3_2: float
+    deciding_game_probability: float
+    at_least_one_tiebreak_probability: float
+    expected_total_points: float
+    expected_total_duration_seconds: float
+    expected_total_rallies: float
+    expected_average_rally_shots: float
+    upset_hint: str
+    style_edge_summary: str
+    physical_edge_summary: str
+    pressure_edge_summary: str
+
+
+class MatchGenerateResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    match_type: str
+    seed: int
+    player_a: dict
+    player_b: dict
+    winner: dict
+    loser: dict
+    match_score_text: str
+    games: list[dict]
+    rallies: list[dict]
+    stats: dict
+    story: dict
