@@ -410,6 +410,9 @@ def _blank_stats(a: MatchPlayer, b: MatchPlayer) -> dict[str, Any]:
         "total_scoring_rallies": 0,
         "total_lets": 0,
         "total_duration_seconds": 0.0,
+        "clean_rally_time_seconds": 0.0,
+        "estimated_broadcast_duration_seconds": 0.0,
+        "estimated_broadcast_duration_minutes": 0.0,
         "average_rally_shots": 0.0,
         "average_rally_duration_seconds": 0.0,
         "longest_rally_shots": 0,
@@ -504,6 +507,10 @@ def _finalize_stats(stats: dict[str, Any], games: list[dict[str, Any]], rallies:
         games_won = stats["games_won"][pid]
         stats["performance_rating"][pid] = round(50 + games_won * 10 + points * 0.35 + stats["pressure_points_won"][pid] * 0.25 - stats["unforced_errors_committed"][pid] * 0.45 - stats["fatigue_final"][pid] * 0.08, 1)
     stats["total_duration_seconds"] = round(stats["total_duration_seconds"], 1)
+    stats["clean_rally_time_seconds"] = stats["total_duration_seconds"]
+    broadcast_duration = stats["clean_rally_time_seconds"] + (stats["total_scoring_rallies"] * 12) + (max(len(games) - 1, 0) * 90) + 60
+    stats["estimated_broadcast_duration_seconds"] = round(broadcast_duration, 1)
+    stats["estimated_broadcast_duration_minutes"] = round(broadcast_duration / 60, 1)
     stats.pop("_shot_sum", None)
     stats.pop("_duration_sum", None)
     return stats
