@@ -261,9 +261,9 @@ class MatchBaseRequest(BaseModel):
 
     @field_validator("match_type")
     @classmethod
-    def tour_only(cls, value: str) -> str:
-        if value != "tour_bo5":
-            raise ValueError("only tour_bo5 is currently supported")
+    def supported_match_type(cls, value: str) -> str:
+        if value not in {"tour_bo5", "league_timed_3x5"}:
+            raise ValueError("match_type must be tour_bo5 or league_timed_3x5")
         return value
 
 
@@ -285,21 +285,21 @@ class MatchPreviewResponse(BaseModel):
     player_b: dict
     player_a_win_probability: float
     player_b_win_probability: float
-    player_a_3_0: float
-    player_a_3_1: float
-    player_a_3_2: float
-    player_b_3_0: float
-    player_b_3_1: float
-    player_b_3_2: float
-    deciding_game_probability: float
-    at_least_one_tiebreak_probability: float
+    player_a_3_0: float = 0.0
+    player_a_3_1: float = 0.0
+    player_a_3_2: float = 0.0
+    player_b_3_0: float = 0.0
+    player_b_3_1: float = 0.0
+    player_b_3_2: float = 0.0
+    deciding_game_probability: float = 0.0
+    at_least_one_tiebreak_probability: float = 0.0
     expected_total_points: float
     expected_total_duration_seconds: float
     expected_total_rallies: float
-    expected_average_rally_shots: float
-    upset_hint: str
+    expected_average_rally_shots: float = 0.0
+    upset_hint: str = ""
     style_edge_summary: str
-    physical_edge_summary: str
+    physical_edge_summary: str = ""
     pressure_edge_summary: str
 
 
@@ -310,8 +310,9 @@ class MatchGenerateResponse(BaseModel):
     seed: int
     player_a: dict
     player_b: dict
-    winner: dict
-    loser: dict
+    winner: dict | None = None
+    loser: dict | None = None
+    is_draw: bool = False
     match_score_text: str
     games: list[dict]
     rallies: list[dict]

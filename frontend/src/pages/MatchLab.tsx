@@ -14,11 +14,13 @@ import { MatchResultView } from '../components/MatchResultView';
 
 type ProfileOption = SeasonProfile & { playerName: string };
 
-function pct(value: number) {
+function pct(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—';
   return `${(value * 100).toFixed(1)}%`;
 }
 
-function minutes(seconds: number) {
+function minutes(seconds: number | null | undefined) {
+  if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return '—';
   return `${(seconds / 60).toFixed(1)} min`;
 }
 
@@ -32,6 +34,7 @@ export function MatchLab() {
   const [playerBProfileId, setPlayerBProfileId] = useState<number | ''>('');
   const [seed, setSeed] = useState('squash-lab-1');
   const [runs, setRuns] = useState(500);
+  const [matchType, setMatchType] = useState<'tour_bo5' | 'league_timed_3x5'>('tour_bo5');
   const [preview, setPreview] = useState<MatchPreviewResponse | null>(null);
   const [result, setResult] = useState<MatchGenerateResponse | null>(null);
   const [loading, setLoading] = useState<'profiles' | 'preview' | 'generate' | 'save' | null>('profiles');
@@ -69,7 +72,7 @@ export function MatchLab() {
       player_a_profile_id: playerAProfileId,
       player_b_profile_id: playerBProfileId,
       seed: seed || null,
-      match_type: 'tour_bo5' as const,
+      match_type: matchType,
       monte_carlo_runs: runs,
     };
   }
@@ -88,7 +91,8 @@ export function MatchLab() {
 
 
   function autoTitle(match: MatchGenerateResponse) {
-    return `${match.winner.name} def. ${match.loser.name} ${match.match_score_text.split(' ')[0]} · ${match.player_a.season_year} Tour BO5`;
+    if (!match.winner || !match.loser || match.is_draw) return `${match.player_a.name} drew ${match.player_b.name} ${match.match_score_text} · ${match.player_a.season_year} League Timed 3x5`;
+    return `${match.winner.name} def. ${match.loser.name} ${match.match_score_text.split(' ')[0]} · ${match.player_a.season_year} ${match.match_type === 'league_timed_3x5' ? 'League Timed 3x5' : 'Tour BO5'}`;
   }
 
   async function saveGeneratedMatch() {
@@ -142,8 +146,9 @@ export function MatchLab() {
         <div className="form-grid">
           <label className="field-label">
             <span>Match type</span>
-            <select value="tour_bo5" disabled>
+            <select value={matchType} onChange={(event) => { setMatchType(event.target.value as 'tour_bo5' | 'league_timed_3x5'); setPreview(null); setResult(null); }}>
               <option value="tour_bo5">Tour BO5 · PAR to 11</option>
+              <option value="league_timed_3x5">League Timed 3x5 · fixed clock</option>
             </select>
           </label>
           <label className="field-label">
@@ -200,28 +205,57 @@ export function MatchLab() {
               </div>
               <span className="seed-pill">Seed {preview.seed}</span>
             </div>
-            <div className="ratings-grid">
-              <div className="rating-card featured"><span>{preview.player_a.name}</span><strong>{pct(preview.player_a_win_probability)}</strong><p>Win probability</p></div>
-              <div className="rating-card featured"><span>{preview.player_b.name}</span><strong>{pct(preview.player_b_win_probability)}</strong><p>Win probability</p></div>
-              <div className="rating-card"><span>Deciding game</span><strong>{pct(preview.deciding_game_probability)}</strong><p>Best-of-five reaches 2-2.</p></div>
-              <div className="rating-card"><span>Tiebreak chance</span><strong>{pct(preview.at_least_one_tiebreak_probability)}</strong><p>At least one game reaches 10-10.</p></div>
-              <div className="rating-card"><span>Expected points</span><strong>{preview.expected_total_points}</strong><p>Total scoring points.</p></div>
-              <div className="rating-card"><span>Expected duration</span><strong>{minutes(preview.expected_total_duration_seconds)}</strong><p>Match time estimate.</p></div>
-              <div className="rating-card"><span>Average rally</span><strong>{preview.expected_average_rally_shots}</strong><p>Shots per rally.</p></div>
-              <div className="rating-card"><span>Expected rallies</span><strong>{preview.expected_total_rallies}</strong><p>Scoring rallies plus lets.</p></div>
-            </div>
-            <div className="scoreline-grid">
-              <span>{preview.player_a.name} 3-0: {pct(preview.player_a_3_0)}</span>
-              <span>{preview.player_a.name} 3-1: {pct(preview.player_a_3_1)}</span>
-              <span>{preview.player_a.name} 3-2: {pct(preview.player_a_3_2)}</span>
-              <span>{preview.player_b.name} 3-0: {pct(preview.player_b_3_0)}</span>
-              <span>{preview.player_b.name} 3-1: {pct(preview.player_b_3_1)}</span>
-              <span>{preview.player_b.name} 3-2: {pct(preview.player_b_3_2)}</span>
-            </div>
-            <p>{preview.upset_hint}</p>
-            <p>{preview.style_edge_summary}</p>
-            <p>{preview.physical_edge_summary}</p>
-            <p>{preview.pressure_edge_summary}</p>
+            {preview.match_type === 'league_timed_3x5' ? (
+              <>
+                <div className="ratings-grid">
+                  <div className="rating-card featured"><span>{preview.player_a.name}</span><strong>{pct(preview.player_a_win_probability)}</strong><p>Win probability</p></div>
+                  <div className="rating-card featured"><span>{preview.player_b.name}</span><strong>{pct(preview.player_b_win_probability)}</strong><p>Win probability</p></div>
+                  <div className="rating-card featured"><span>Draw</span><strong>{pct(preview.draw_probability)}</strong><p>Match draw probability.</p></div>
+                  <div className="rating-card"><span>Expected points</span><strong>{preview.expected_total_points}</strong><p>Total scoring points.</p></div>
+                  <div className="rating-card"><span>Points/min</span><strong>{preview.expected_points_per_minute}</strong><p>Timed scoring pace.</p></div>
+                  <div className="rating-card"><span>Final-minute decider</span><strong>{pct(preview.final_minute_decider_probability)}</strong><p>At least one set decided late.</p></div>
+                  <div className="rating-card"><span>One drawn set</span><strong>{pct(preview.one_drawn_set_probability)}</strong><p>Exactly one tied set.</p></div>
+                  <div className="rating-card"><span>Match draw</span><strong>{pct(preview.match_draw_probability)}</strong><p>Equal set wins after 3 sets.</p></div>
+                </div>
+                <div className="scoreline-grid">
+                  <span>{preview.player_a.name} 3-0: {pct(preview.player_a_3_0_sets)}</span>
+                  <span>{preview.player_a.name} 2-1: {pct(preview.player_a_2_1_sets)}</span>
+                  <span>{preview.player_b.name} 3-0: {pct(preview.player_b_3_0_sets)}</span>
+                  <span>{preview.player_b.name} 2-1: {pct(preview.player_b_2_1_sets)}</span>
+                  <span>2+ drawn sets: {pct(preview.two_or_more_drawn_sets_probability)}</span>
+                  <span>Expected set scores: {preview.expected_set_scores?.map((score) => `${score[0]}-${score[1]}`).join(' · ')}</span>
+                </div>
+                <p>{preview.style_edge_summary}</p>
+                <p>{preview.pace_edge_summary}</p>
+                <p>{preview.pressure_edge_summary}</p>
+                <p>{preview.league_suitability_summary}</p>
+              </>
+            ) : (
+              <>
+                <div className="ratings-grid">
+                  <div className="rating-card featured"><span>{preview.player_a.name}</span><strong>{pct(preview.player_a_win_probability)}</strong><p>Win probability</p></div>
+                  <div className="rating-card featured"><span>{preview.player_b.name}</span><strong>{pct(preview.player_b_win_probability)}</strong><p>Win probability</p></div>
+                  <div className="rating-card"><span>Deciding game</span><strong>{pct(preview.deciding_game_probability)}</strong><p>Best-of-five reaches 2-2.</p></div>
+                  <div className="rating-card"><span>Tiebreak chance</span><strong>{pct(preview.at_least_one_tiebreak_probability)}</strong><p>At least one game reaches 10-10.</p></div>
+                  <div className="rating-card"><span>Expected points</span><strong>{preview.expected_total_points}</strong><p>Total scoring points.</p></div>
+                  <div className="rating-card"><span>Expected duration</span><strong>{minutes(preview.expected_total_duration_seconds)}</strong><p>Match time estimate.</p></div>
+                  <div className="rating-card"><span>Average rally</span><strong>{preview.expected_average_rally_shots}</strong><p>Shots per rally.</p></div>
+                  <div className="rating-card"><span>Expected rallies</span><strong>{preview.expected_total_rallies}</strong><p>Scoring rallies plus lets.</p></div>
+                </div>
+                <div className="scoreline-grid">
+                  <span>{preview.player_a.name} 3-0: {pct(preview.player_a_3_0)}</span>
+                  <span>{preview.player_a.name} 3-1: {pct(preview.player_a_3_1)}</span>
+                  <span>{preview.player_a.name} 3-2: {pct(preview.player_a_3_2)}</span>
+                  <span>{preview.player_b.name} 3-0: {pct(preview.player_b_3_0)}</span>
+                  <span>{preview.player_b.name} 3-1: {pct(preview.player_b_3_1)}</span>
+                  <span>{preview.player_b.name} 3-2: {pct(preview.player_b_3_2)}</span>
+                </div>
+                <p>{preview.upset_hint}</p>
+                <p>{preview.style_edge_summary}</p>
+                <p>{preview.physical_edge_summary}</p>
+                <p>{preview.pressure_edge_summary}</p>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -162,7 +162,7 @@ export type MatchRequest = {
   player_a_profile_id: number;
   player_b_profile_id: number;
   seed?: number | string | null;
-  match_type?: 'tour_bo5';
+  match_type?: 'tour_bo5' | 'league_timed_3x5';
   monte_carlo_runs?: number;
 };
 
@@ -186,22 +186,35 @@ export type MatchPreviewResponse = {
   player_b: MatchPlayerSummary;
   player_a_win_probability: number;
   player_b_win_probability: number;
-  player_a_3_0: number;
-  player_a_3_1: number;
-  player_a_3_2: number;
-  player_b_3_0: number;
-  player_b_3_1: number;
-  player_b_3_2: number;
-  deciding_game_probability: number;
-  at_least_one_tiebreak_probability: number;
+  player_a_3_0?: number;
+  player_a_3_1?: number;
+  player_a_3_2?: number;
+  player_b_3_0?: number;
+  player_b_3_1?: number;
+  player_b_3_2?: number;
+  deciding_game_probability?: number;
+  at_least_one_tiebreak_probability?: number;
   expected_total_points: number;
   expected_total_duration_seconds: number;
   expected_total_rallies: number;
-  expected_average_rally_shots: number;
-  upset_hint: string;
+  expected_average_rally_shots?: number;
+  upset_hint?: string;
   style_edge_summary: string;
-  physical_edge_summary: string;
+  physical_edge_summary?: string;
   pressure_edge_summary: string;
+  draw_probability?: number;
+  player_a_3_0_sets?: number;
+  player_a_2_1_sets?: number;
+  player_b_3_0_sets?: number;
+  player_b_2_1_sets?: number;
+  one_drawn_set_probability?: number;
+  two_or_more_drawn_sets_probability?: number;
+  match_draw_probability?: number;
+  expected_points_per_minute?: number;
+  expected_set_scores?: [number, number][];
+  final_minute_decider_probability?: number;
+  pace_edge_summary?: string;
+  league_suitability_summary?: string;
 };
 
 export type RallyEvent = {
@@ -222,16 +235,25 @@ export type RallyEvent = {
   t_control_player_profile_id: number;
   fatigue_after: { player_a: number; player_b: number };
   explanation: string;
+  game_clock_before_seconds?: number;
+  game_clock_after_seconds?: number;
+  seconds_remaining_after?: number;
+  clock_phase?: string;
+  point_rate_context?: string;
 };
 
 export type GameSummary = {
   game_number: number;
   score: [number, number];
-  winner_profile_id: number;
+  winner_profile_id: number | null;
   duration_seconds: number;
   scoring_rallies: number;
   lets: number;
   tiebreak?: boolean;
+  is_draw?: boolean;
+  scheduled_duration_seconds?: number;
+  final_minute_points?: Record<string, number>;
+  lead_changes?: number;
 };
 
 export type MatchGenerateResponse = {
@@ -239,8 +261,9 @@ export type MatchGenerateResponse = {
   seed: number;
   player_a: MatchPlayerSummary;
   player_b: MatchPlayerSummary;
-  winner: MatchPlayerSummary;
-  loser: MatchPlayerSummary;
+  winner: MatchPlayerSummary | null;
+  loser: MatchPlayerSummary | null;
+  is_draw?: boolean;
   match_score_text: string;
   games: GameSummary[];
   rallies: RallyEvent[];
