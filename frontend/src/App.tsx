@@ -26,7 +26,7 @@ function renderPage(activePage: PageKey, setActivePage: (page: PageKey) => void)
     case 'players':
       return <Players />;
     case 'match-lab':
-      return <MatchLab onOpenSavedMatches={() => setActivePage('saved-matches')} />;
+      return <MatchLab onOpenPlayers={() => setActivePage('players')} onOpenSavedMatches={() => setActivePage('saved-matches')} />;
     case 'saved-matches':
       return <SavedMatches onOpenAnalytics={() => setActivePage('analytics')} />;
     case 'analytics':
