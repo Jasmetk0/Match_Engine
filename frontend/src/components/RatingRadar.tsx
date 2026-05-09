@@ -27,26 +27,29 @@ function pointsToString(points: { x: number; y: number }[]) {
 
 export function RatingRadar({ values, size = 280, color = 'var(--accent-emerald)' }: RatingRadarProps) {
   const safeValues = values.length > 0 ? values : [{ label: 'Rating', value: 0 }];
-  const center = size / 2;
-  const radius = size * 0.34;
-  const labelRadius = size * 0.43;
+  const viewBoxSize = 360;
+  const center = viewBoxSize / 2;
+  const radius = viewBoxSize * 0.27;
+  const labelRadius = viewBoxSize * 0.37;
   const total = safeValues.length;
   const polygon = safeValues.map((entry, index) => pointFor(index, total, radius, center, clamp(entry.value) / 100));
 
   return (
-    <div className="rating-radar" style={{ width: size, maxWidth: '100%' }}>
-      <svg aria-label="Player category radar chart" role="img" viewBox={`0 0 ${size} ${size}`}>
+    <div className="rating-radar" style={{ maxWidth: `${size}px` }}>
+      <svg aria-label="Player category radar chart" role="img" viewBox={`0 0 ${viewBoxSize} ${viewBoxSize}`} preserveAspectRatio="xMidYMid meet">
         {[0.25, 0.5, 0.75, 1].map((scale) => (
           <polygon className="radar-grid" key={scale} points={pointsToString(safeValues.map((_, index) => pointFor(index, total, radius, center, scale)))} />
         ))}
         {safeValues.map((entry, index) => {
           const end = pointFor(index, total, radius, center, 1);
           const label = pointFor(index, total, labelRadius, center, 1);
+          const anchor = label.x < center - 10 ? 'end' : label.x > center + 10 ? 'start' : 'middle';
+          const labelYOffset = label.y < center - 50 ? -4 : label.y > center + 50 ? 12 : 4;
           return (
             <g key={entry.label}>
               <line className="radar-axis" x1={center} x2={end.x} y1={center} y2={end.y} />
-              <text className="radar-label" textAnchor={label.x < center - 8 ? 'end' : label.x > center + 8 ? 'start' : 'middle'} x={label.x} y={label.y}>{entry.label}</text>
-              <text className="radar-value" textAnchor={label.x < center - 8 ? 'end' : label.x > center + 8 ? 'start' : 'middle'} x={label.x} y={label.y + 14}>{Math.round(clamp(entry.value))}</text>
+              <text className="radar-label" textAnchor={anchor} x={label.x} y={label.y + labelYOffset}>{entry.label}</text>
+              <text className="radar-value" textAnchor={anchor} x={label.x} y={label.y + labelYOffset + 14}>{Math.round(clamp(entry.value))}</text>
             </g>
           );
         })}
