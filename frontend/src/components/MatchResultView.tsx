@@ -120,6 +120,9 @@ export function MatchResultView({ result, label = 'Match result', defaultRallyOp
             {stats.final_minute_points_won && <span>Final minute points: <strong>{namedPair(stats.final_minute_points_won, names)}</strong></span>}
             {stats.lead_changes_by_set && <span>Lead changes by set: <strong>{stats.lead_changes_by_set.join(' / ')}</strong></span>}
             {stats.clock_pressure_points_won && <span>Clock pressure points: <strong>{namedPair(stats.clock_pressure_points_won, names)}</strong></span>}
+            {result.calibration_debug && Object.entries(result.calibration_debug).map(([key, value]) => (
+              <span key={key}>Calibration {key.replace(/_/g, ' ')}: <strong>{String(value)}</strong></span>
+            ))}
           </div>
         </details>
         <div className="story-box">

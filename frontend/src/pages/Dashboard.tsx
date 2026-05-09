@@ -9,8 +9,10 @@ import {
   getSavedMatchesHealth,
   importSavedMatches,
   resetSampleData,
+  runRealismReport,
   runSelfTest,
   type HealthResponse,
+  type RealismReportResponse,
   type SelfTestResponse,
 } from '../services/api';
 
@@ -20,6 +22,10 @@ function pretty(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+function minutes(seconds: number) {
+  return `${(seconds / 60).toFixed(1)} min`;
+}
+
 export function Dashboard() {
   const [connectionState, setConnectionState] = useState<ConnectionState>('checking');
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -27,6 +33,7 @@ export function Dashboard() {
   const [devMessage, setDevMessage] = useState<string>('');
   const [importText, setImportText] = useState('');
   const [selfTest, setSelfTest] = useState<SelfTestResponse | null>(null);
+  const [realismReport, setRealismReport] = useState<RealismReportResponse | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -71,6 +78,17 @@ export function Dashboard() {
       setDevMessage(`Self-test: ${result.status}`);
     } catch (err) {
       setDevMessage(`Self-test: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  }
+
+  async function runDashboardRealismReport() {
+    try {
+      setDevMessage('Realism report: running 600 deterministic simulations…');
+      const result = await runRealismReport();
+      setRealismReport(result);
+      setDevMessage(`Realism report: complete (${result.reports.length} rows)`);
+    } catch (err) {
+      setDevMessage(`Realism report: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   }
 
@@ -164,6 +182,7 @@ export function Dashboard() {
           <button className="ghost-button" onClick={() => runDevCheck(getSavedMatchesHealth, 'Saved matches health')} type="button">2. Saved router</button>
           <button className="ghost-button" onClick={() => runDevCheck(resetSampleData, 'Reset elite sample players')} type="button">3. Reset samples</button>
           <button className="primary-button" onClick={runDashboardSelfTest} type="button">4. Run Self-Test</button>
+          <button className="ghost-button" onClick={runDashboardRealismReport} type="button">Run Realism Report</button>
         </div>
       </div>
 
@@ -201,6 +220,36 @@ export function Dashboard() {
           <h3>Generated summaries</h3>
           <div className="scoreline-grid">
             {Object.entries(selfTest.generated_summaries).map(([name, summary]) => <span key={name}>{summary}</span>)}
+          </div>
+        </div>
+      )}
+
+      {realismReport && (
+        <div className="metric-card dev-tools-card wide-card">
+          <span>Calibration realism report</span>
+          <strong>{realismReport.reports.length} matchup checks · {realismReport.runs_per_matchup} runs each</strong>
+          <p>Generated {new Date(realismReport.generated_at).toLocaleString()} without saving matches.</p>
+          <div className="rally-table-wrap">
+            <table className="rally-table">
+              <thead>
+                <tr><th>Format</th><th>Matchup</th><th>Win rates</th><th>Avg pts</th><th>Clean</th><th>Broadcast</th><th>Shots</th><th>Common scores</th><th>Flags</th></tr>
+              </thead>
+              <tbody>
+                {realismReport.reports.map((row) => (
+                  <tr key={`${row.match_type}-${row.matchup}`}>
+                    <td>{row.match_type === 'league_timed_3x5' ? 'League' : 'Tour'}</td>
+                    <td>{row.matchup}</td>
+                    <td>{Math.round(row.player_a_win_rate * 100)}% / {Math.round(row.player_b_win_rate * 100)}%{row.draw_rate > 0 ? ` / draw ${Math.round(row.draw_rate * 100)}%` : ''}</td>
+                    <td>{row.average_total_points}</td>
+                    <td>{minutes(row.average_clean_time)}</td>
+                    <td>{minutes(row.average_broadcast_time)}</td>
+                    <td>{row.average_rally_shots}</td>
+                    <td>{row.common_scorelines.map((score) => `${score.scoreline} (${score.count})`).join(', ')}</td>
+                    <td>{row.realism_flags.join('; ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

@@ -256,6 +256,7 @@ export type MatchPreviewResponse = {
   final_minute_decider_probability?: number;
   pace_edge_summary?: string;
   league_suitability_summary?: string;
+  preview_diagnostics?: Record<string, unknown>;
 };
 
 export type RallyEvent = {
@@ -310,6 +311,7 @@ export type MatchGenerateResponse = {
   rallies: RallyEvent[];
   stats: Record<string, any>;
   story: Record<string, string>;
+  calibration_debug?: Record<string, unknown>;
 };
 
 export async function previewMatch(payload: MatchRequest): Promise<MatchPreviewResponse> {
@@ -522,6 +524,27 @@ export type SelfTestResponse = {
   errors: string[];
 };
 
+export type RealismReportRow = {
+  match_type: 'tour_bo5' | 'league_timed_3x5';
+  matchup: string;
+  player_a_win_rate: number;
+  player_b_win_rate: number;
+  draw_rate: number;
+  average_total_points: number;
+  average_clean_time: number;
+  average_broadcast_time: number;
+  average_rally_shots: number;
+  common_scorelines: { scoreline: string; count: number }[];
+  notes: string;
+  realism_flags: string[];
+};
+
+export type RealismReportResponse = {
+  runs_per_matchup: number;
+  generated_at: string;
+  reports: RealismReportRow[];
+};
+
 export async function getDbInfo(): Promise<DbInfoResponse> {
   return request<DbInfoResponse>('/dev/db-info');
 }
@@ -540,4 +563,8 @@ export async function importSavedMatches(savedMatches: unknown[]): Promise<Impor
 
 export async function runSelfTest(saveTestMatches = false): Promise<SelfTestResponse> {
   return request<SelfTestResponse>('/dev/self-test', { method: 'POST', body: JSON.stringify({ save_test_matches: saveTestMatches }) });
+}
+
+export async function runRealismReport(): Promise<RealismReportResponse> {
+  return request<RealismReportResponse>('/dev/realism-report', { method: 'POST' });
 }
