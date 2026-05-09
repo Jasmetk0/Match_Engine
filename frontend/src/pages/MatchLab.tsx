@@ -14,6 +14,7 @@ import {
   SeasonProfile,
 } from '../services/api';
 import { MatchResultView } from '../components/MatchResultView';
+import { PlayerAvatar } from '../components/PlayerAvatar';
 
 
 const DEFAULT_CONTEXT: MatchContext = {
@@ -198,6 +199,55 @@ function isCustomishProfile(profile: ProfileOption) {
     || textHasCustomMarker(profile.notes)
     || !SAMPLE_PLAYER_NAMES.has(profile.playerName.toLowerCase())
     || Boolean(profile.nationality && !SAMPLE_NATIONALITIES.has(profile.nationality.toLowerCase()));
+}
+
+
+function topStrengths(profile: ProfileOption) {
+  return ATTRIBUTE_LABELS
+    .map(({ key, label }) => ({ label, value: profile.attributes[key] ?? 0 }))
+    .sort((left, right) => right.value - left.value)
+    .slice(0, 3)
+    .map((entry) => `${entry.label} ${Math.round(entry.value)}`);
+}
+
+function MatchupPlayerCard({ profile, side }: { profile: ProfileOption; side: 'A' | 'B' }) {
+  return (
+    <div className={`matchup-player-card side-${side.toLowerCase()}`}>
+      <div className="matchup-side-label">Player {side}</div>
+      <PlayerAvatar name={profile.playerName} subtitle={profile.nationality ?? `Season ${profile.season_year}`} handedness={undefined} playStyle={profile.play_style} size="md" />
+      <div className="matchup-rating-row">
+        <span><strong>{profile.tournament_rating.toFixed(1)}</strong> Tour</span>
+        <span><strong>{profile.league_rating.toFixed(1)}</strong> League</span>
+      </div>
+      <p>{profile.play_style} · Form {profile.form} · Confidence {profile.confidence}</p>
+      <div className="strength-list">{topStrengths(profile).map((strength) => <span key={strength}>{strength}</span>)}</div>
+    </div>
+  );
+}
+
+function CategoryEdgeBars({ a, b }: { a: ProfileOption; b: ProfileOption }) {
+  const rows = [
+    ['Technical', a.technical_rating, b.technical_rating],
+    ['Physical', a.physical_rating, b.physical_rating],
+    ['Tactical', a.tactical_rating, b.tactical_rating],
+    ['Mental', a.mental_rating, b.mental_rating],
+    ['Attack', a.attacking_rating, b.attacking_rating],
+    ['Defense', a.defensive_rating, b.defensive_rating],
+  ] as const;
+  return (
+    <div className="category-edge-bars">
+      {rows.map(([label, av, bv]) => {
+        const total = Math.max(1, av + bv);
+        return (
+          <div className="category-edge-row" key={label}>
+            <strong>{av.toFixed(1)}</strong>
+            <div><span>{label}</span><div className="edge-track"><i style={{ width: `${(av / total) * 100}%` }} /><b style={{ width: `${(bv / total) * 100}%` }} /></div></div>
+            <strong>{bv.toFixed(1)}</strong>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function setupStorageAvailable() {
@@ -739,14 +789,13 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
       </div>
 
       {selectedA && selectedB && (
-        <div className="ratings-grid matchup-grid">
-          {[selectedA, selectedB].map((profile) => (
-            <div className="rating-card featured" key={profile.id}>
-              <span>{profile.playerName}</span>
-              <strong>{profile.play_style}</strong>
-              <p>Tour {profile.tournament_rating.toFixed(1)} · Mental {profile.mental_rating.toFixed(1)} · Physical {profile.physical_rating.toFixed(1)}</p>
-            </div>
-          ))}
+        <div className="matchup-broadcast-card">
+          <MatchupPlayerCard profile={selectedA} side="A" />
+          <div className="vs-block">
+            <span>VS</span>
+            <small>{matchType === 'league_timed_3x5' ? 'League Timed 3x5' : 'Tour BO5'}</small>
+          </div>
+          <MatchupPlayerCard profile={selectedB} side="B" />
         </div>
       )}
 
@@ -759,6 +808,7 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
             </div>
             <span className="seed-pill">{matchType === 'league_timed_3x5' ? 'League Timed 3x5' : 'Tour BO5'}</span>
           </div>
+          <CategoryEdgeBars a={selectedA} b={selectedB} />
           <div className="scoreline-grid comparison-grid">
             <span>Tour rating edge: <strong>{comparison.tourEdge}</strong></span>
             <span>League rating edge: <strong>{comparison.leagueEdge}</strong></span>
