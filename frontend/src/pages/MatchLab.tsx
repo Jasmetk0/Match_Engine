@@ -100,6 +100,28 @@ type SavedSetup = {
 
 const SETUPS_STORAGE_KEY = 'squash-match-lab:setups';
 
+async function fetchProfileOptions(): Promise<ProfileOption[]> {
+  const players = await listPlayers();
+  const loaded = await Promise.all(players.map((player) => getPlayer(player.id)));
+  return loaded.flatMap((player) => player.profiles.map((profile) => ({
+    ...profile,
+    playerName: player.name,
+    nationality: player.nationality,
+    playerCreatedAt: player.created_at,
+    playerUpdatedAt: player.updated_at,
+    playerNotes: player.notes,
+  })));
+}
+
+function chooseFallbackPair(options: ProfileOption[], currentA: number | '', currentB: number | ''): { nextA: number | ''; nextB: number | ''; changed: boolean } {
+  const ids = new Set(options.map((profile) => profile.id));
+  const nextA: number | '' = currentA && ids.has(currentA) ? currentA : options[0]?.id ?? '';
+  const nextB: number | '' = currentB && ids.has(currentB) && currentB !== nextA
+    ? currentB
+    : options.find((profile) => profile.id !== nextA)?.id ?? '';
+  return { nextA, nextB, changed: nextA !== currentA || nextB !== currentB };
+}
+
 function pct(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
   return `${(value * 100).toFixed(1)}%`;
@@ -162,8 +184,32 @@ function styleMatchupNote(a: ProfileOption, b: ProfileOption) {
   return `${a.play_style} vs ${b.play_style}: compare initiative, recovery and shot selection before choosing format.`;
 }
 
+const SAMPLE_PLAYER_NAMES = new Set(['arebady macky jr', 'benjamin paris', 'olivier da silva']);
+const SAMPLE_NATIONALITIES = new Set(['fax & finiat', 'francica']);
+const CUSTOM_MARKERS = ['custom', 'generated', 'random', 'copy'];
+
+function textHasCustomMarker(value: string | null | undefined) {
+  const haystack = (value ?? '').toLowerCase();
+  return CUSTOM_MARKERS.some((marker) => haystack.includes(marker));
+}
+
+function isCustomishProfile(profile: ProfileOption) {
+  return textHasCustomMarker(profile.playerNotes)
+    || textHasCustomMarker(profile.notes)
+    || !SAMPLE_PLAYER_NAMES.has(profile.playerName.toLowerCase())
+    || Boolean(profile.nationality && !SAMPLE_NATIONALITIES.has(profile.nationality.toLowerCase()));
+}
+
 function setupStorageAvailable() {
-  return typeof window !== 'undefined' && Boolean(window.localStorage);
+  if (typeof window === 'undefined') return false;
+  try {
+    const probeKey = `${SETUPS_STORAGE_KEY}:probe`;
+    window.localStorage.setItem(probeKey, '1');
+    window.localStorage.removeItem(probeKey);
+    return true;
+  } catch (error) {
+    return false;
+  }
 }
 
 function readSavedSetups(): SavedSetup[] {
@@ -210,36 +256,42 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
   const [savedMatchId, setSavedMatchId] = useState<number | null>(null);
   const [savedSignature, setSavedSignature] = useState<string | null>(null);
   const [setupLabel, setSetupLabel] = useState('');
+  const [setupStorageReady, setSetupStorageReady] = useState(() => setupStorageAvailable());
   const [savedSetups, setSavedSetups] = useState<SavedSetup[]>(() => readSavedSetups());
   const [selectedSetupId, setSelectedSetupId] = useState('');
   const [setupMessage, setSetupMessage] = useState<string | null>(null);
+  const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [batchRuns, setBatchRuns] = useState(20);
   const [batchResult, setBatchResult] = useState<BatchMatchResponse | null>(null);
 
-  useEffect(() => {
-    async function loadProfiles() {
-      try {
-        setLoading('profiles');
-        const players = await listPlayers();
-        const loaded = await Promise.all(players.map((player) => getPlayer(player.id)));
-        const options = loaded.flatMap((player) => player.profiles.map((profile) => ({
-          ...profile,
-          playerName: player.name,
-          nationality: player.nationality,
-          playerCreatedAt: player.created_at,
-          playerUpdatedAt: player.updated_at,
-          playerNotes: player.notes,
-        })));
-        setProfiles(options);
-        setPlayerAProfileId((current) => current || options[0]?.id || '');
-        setPlayerBProfileId((current) => current || options[1]?.id || '');
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not load season profiles');
-      } finally {
-        setLoading(null);
+  async function refreshProfiles(silent = false) {
+    try {
+      setError(null);
+      if (!silent) setProfileMessage(null);
+      setLoading('profiles');
+      const options = await fetchProfileOptions();
+      const { nextA, nextB, changed } = chooseFallbackPair(options, playerAProfileId, playerBProfileId);
+      setProfiles(options);
+      setPlayerAProfileId(nextA);
+      setPlayerBProfileId(nextB);
+      if (changed) clearGeneratedState();
+      if (!silent) {
+        setProfileMessage(changed
+          ? 'Profiles refreshed. Selection changed because a saved profile was missing.'
+          : `Profiles refreshed (${options.length} loaded).`);
       }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not load season profiles';
+      setError(message.startsWith('Network error:') ? 'Could not refresh profiles. Is the backend running?' : message);
+      if (!silent) setProfileMessage('Profile refresh failed.');
+    } finally {
+      setLoading(null);
     }
-    loadProfiles();
+  }
+
+  useEffect(() => {
+    refreshProfiles(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selectedA = useMemo(() => profiles.find((profile) => profile.id === playerAProfileId), [profiles, playerAProfileId]);
@@ -249,7 +301,7 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
   const filteredProfiles = useMemo(() => {
     const query = profileSearch.trim().toLowerCase();
     return profiles.filter((profile) => {
-      const customish = profile.playerNotes?.toLowerCase().includes('custom') || profile.notes?.toLowerCase().includes('custom') || profile.season_year !== 2030;
+      const customish = isCustomishProfile(profile);
       const filterMatch = profileFilter === 'all'
         || (profileFilter === 'top-tour' && profile.tournament_rating >= topTourCutoff)
         || (profileFilter === 'top-league' && profile.league_rating >= topLeagueCutoff)
@@ -274,7 +326,23 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
       note: styleMatchupNote(selectedA, selectedB),
     };
   }, [selectedA, selectedB]);
-  const currentSaveSignature = useMemo(() => result ? JSON.stringify({ result, preview, title: saveTitle.trim() || autoTitle(result), notes: saveNotes }) : null, [result, preview, saveTitle, saveNotes]);
+  const currentSaveSignature = useMemo(() => {
+    if (!result) return null;
+    const firstRally = result.rallies?.[0]?.rally_number ?? '';
+    const lastRally = result.rallies?.[result.rallies.length - 1]?.rally_number ?? '';
+    return [
+      result.seed,
+      result.match_type,
+      result.player_a.profile_id,
+      result.player_b.profile_id,
+      result.match_score_text,
+      saveTitle.trim() || autoTitle(result),
+      saveNotes,
+      result.rallies?.length ?? 0,
+      firstRally,
+      lastRally,
+    ].join('|');
+  }, [result, saveTitle, saveNotes]);
   const sameProfileSelected = Boolean(playerAProfileId && playerBProfileId && playerAProfileId === playerBProfileId);
 
   function clearGeneratedState() {
@@ -406,40 +474,82 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
   }
 
   function persistSetups(nextSetups: SavedSetup[]) {
-    setSavedSetups(nextSetups);
-    window.localStorage.setItem(SETUPS_STORAGE_KEY, JSON.stringify(nextSetups));
+    if (!setupStorageReady) {
+      setSetupMessage('Favorite setups are unavailable because browser localStorage is blocked.');
+      return false;
+    }
+    try {
+      window.localStorage.setItem(SETUPS_STORAGE_KEY, JSON.stringify(nextSetups));
+      setSavedSetups(nextSetups);
+      return true;
+    } catch (error) {
+      setSetupStorageReady(false);
+      setSavedSetups([]);
+      setSelectedSetupId('');
+      setSetupMessage('Favorite setups are unavailable because browser localStorage is blocked.');
+      return false;
+    }
   }
 
   function saveSetup() {
-    if (!playerAProfileId || !playerBProfileId) {
-      setSetupMessage('Choose two profiles before saving a setup.');
+    if (!setupStorageReady) {
+      setSetupMessage('Favorite setups are unavailable because browser localStorage is blocked.');
       return;
     }
+    if (!playerAProfileId || !playerBProfileId) {
+      setSetupMessage('Choose Player A and Player B before saving a setup.');
+      return;
+    }
+    if (playerAProfileId === playerBProfileId) {
+      setSetupMessage('Choose two different profiles before saving a setup.');
+      return;
+    }
+    if (!selectedA || !selectedB) {
+      setSetupMessage('Selected profiles are no longer available. Refresh profiles before saving.');
+      return;
+    }
+    const cleanSeed = seed.trim();
     const setup: SavedSetup = {
       id: crypto.randomUUID(),
-      label: setupLabel.trim() || `${selectedA?.playerName ?? 'Player A'} vs ${selectedB?.playerName ?? 'Player B'} · ${matchType === 'league_timed_3x5' ? 'League Timed 3x5' : 'Tour BO5'}`,
+      label: setupLabel.trim() || `${selectedA.playerName} vs ${selectedB.playerName} · ${matchType === 'league_timed_3x5' ? 'League Timed 3x5' : 'Tour BO5'}`,
       player_a_profile_id: playerAProfileId,
       player_b_profile_id: playerBProfileId,
       match_type: matchType,
-      seed,
+      seed: cleanSeed,
       match_context: matchContext,
-      monte_carlo_runs: runs,
+      monte_carlo_runs: Number.isFinite(runs) ? runs : 500,
     };
-    persistSetups([...savedSetups, setup]);
+    if (!persistSetups([...savedSetups, setup])) return;
     setSelectedSetupId(setup.id);
     setSetupLabel('');
     setSetupMessage(`Saved setup: ${setup.label}.`);
   }
 
   function loadSetup() {
-    const setup = savedSetups.find((entry) => entry.id === selectedSetupId);
-    if (!setup) return;
+    if (!setupStorageReady) {
+      setSetupMessage('Favorite setups are unavailable because browser localStorage is blocked.');
+      return;
+    }
+    const latestSetups = readSavedSetups();
+    setSavedSetups(latestSetups);
+    const setup = latestSetups.find((entry) => entry.id === selectedSetupId);
+    if (!setup) {
+      setSelectedSetupId('');
+      setSetupMessage('That saved setup no longer exists.');
+      return;
+    }
+    const hasA = profiles.some((profile) => profile.id === setup.player_a_profile_id);
+    const hasB = profiles.some((profile) => profile.id === setup.player_b_profile_id);
+    if (!hasA || !hasB || setup.player_a_profile_id === setup.player_b_profile_id) {
+      setSetupMessage('This setup references profiles that no longer exist.');
+      return;
+    }
     setPlayerAProfileId(setup.player_a_profile_id);
     setPlayerBProfileId(setup.player_b_profile_id);
     setMatchType(setup.match_type);
-    setSeed(setup.seed);
-    setRuns(setup.monte_carlo_runs);
-    setMatchContext(setup.match_context);
+    setSeed(setup.seed || '');
+    setRuns(Number.isFinite(setup.monte_carlo_runs) ? setup.monte_carlo_runs : 500);
+    setMatchContext(setup.match_context ?? DEFAULT_CONTEXT);
     clearGeneratedState();
     setSetupMessage(`Loaded setup: ${setup.label}.`);
   }
@@ -447,7 +557,8 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
   function deleteSetup() {
     if (!selectedSetupId) return;
     const setup = savedSetups.find((entry) => entry.id === selectedSetupId);
-    persistSetups(savedSetups.filter((entry) => entry.id !== selectedSetupId));
+    if (!window.confirm(`Delete saved setup${setup ? ` "${setup.label}"` : ''}?`)) return;
+    if (!persistSetups(savedSetups.filter((entry) => entry.id !== selectedSetupId))) return;
     setSelectedSetupId('');
     setSetupMessage(setup ? `Deleted setup: ${setup.label}.` : 'Deleted setup.');
   }
@@ -491,8 +602,12 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+      {profileMessage && <div className={profileMessage.includes('failed') ? 'error-banner' : 'success-banner'}>{profileMessage}</div>}
       {profiles.length === 0 && loading !== 'profiles' && (
-        <div className="error-banner">No season profiles found. Go to Players and reset elite sample players.</div>
+        <div className="error-banner">No season profiles found. Go to Players and reset elite sample players, then Refresh Profiles.</div>
+      )}
+      {profiles.length === 1 && loading !== 'profiles' && (
+        <div className="error-banner">Only one season profile is available. Create or reset another player before generating a match.</div>
       )}
       {sameProfileSelected && (
         <div className="error-banner">Choose two different season profiles before running a preview, match, or batch simulation.</div>
@@ -514,14 +629,16 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
           </label>
           <label className="field-label">
             <span>Player A season profile</span>
-            <select value={playerAProfileId} onChange={(event) => { setPlayerAProfileId(Number(event.target.value)); clearGeneratedState(); }}>
+            <select value={playerAProfileId} onChange={(event) => { setPlayerAProfileId(event.target.value ? Number(event.target.value) : ''); clearGeneratedState(); }}>
+              {filteredProfiles.length === 0 && <option value="">No profiles match this filter</option>}
               {!filteredProfiles.some((profile) => profile.id === playerAProfileId) && selectedA && <option value={selectedA.id}>{profileLabel(selectedA)} (selected)</option>}
               {filteredProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profileLabel(profile)}</option>)}
             </select>
           </label>
           <label className="field-label">
             <span>Player B season profile</span>
-            <select value={playerBProfileId} onChange={(event) => { setPlayerBProfileId(Number(event.target.value)); clearGeneratedState(); }}>
+            <select value={playerBProfileId} onChange={(event) => { setPlayerBProfileId(event.target.value ? Number(event.target.value) : ''); clearGeneratedState(); }}>
+              {filteredProfiles.length === 0 && <option value="">No profiles match this filter</option>}
               {!filteredProfiles.some((profile) => profile.id === playerBProfileId) && selectedB && <option value={selectedB.id}>{profileLabel(selectedB)} (selected)</option>}
               {filteredProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profileLabel(profile)}</option>)}
             </select>
@@ -529,7 +646,7 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
           <label className="field-label">
             <span>Seed</span>
             <input value={seed} onChange={(event) => { setSeed(event.target.value); setSaveMessage(null); setSavedMatchId(null); setSavedSignature(null); }} placeholder="Optional deterministic seed" />
-            <small>{seedLocked ? 'Seed locked: Generate Match will reproduce the same result.' : 'Same seed = same match. Randomize or Regenerate for a fresh simulation.'}</small>
+            <small>{seedLocked ? 'Seed locked: Generate Match will reproduce this exact simulation. Unlock to randomize/regenerate.' : 'Seed unlocked: Randomize or Regenerate creates a new simulation.'}</small>
             <div className="button-row seed-control-row">
               <button className="ghost-button" onClick={copySeed} type="button">Copy Seed</button>
               <button className={seedLocked ? 'primary-button' : 'ghost-button'} onClick={() => { setSeedLocked(!seedLocked); setSeedMessage(!seedLocked ? 'Seed locked: Generate Match will reproduce the same result.' : 'Seed unlocked.'); }} type="button">{seedLocked ? 'Unlock seed' : 'Lock seed'}</button>
@@ -539,20 +656,22 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
           <label className="field-label">
             <span>Monte Carlo runs</span>
             <input max={3000} min={50} step={50} type="number" value={runs} onChange={(event) => setRuns(Number(event.target.value))} />
-            <small>500 is recommended for fast local testing. Higher runs are useful but may feel slow on older PCs.</small>
+            <small>500 is recommended for fast local testing. 3000 can be slow on older PCs.</small>
+            {runs > 1000 && <small>Warning: more than 1000 preview runs may take noticeably longer.</small>}
           </label>
         </div>
         <div className="button-row match-actions profile-filter-row">
           {([['all', 'All'], ['top-tour', 'Top Tour'], ['top-league', 'Top League'], ['2030', '2030 only'], ['custom', 'Custom players']] as [ProfileFilter, string][]).map(([key, label]) => (
             <button className={profileFilter === key ? 'primary-button' : 'ghost-button'} key={key} onClick={() => setProfileFilter(key)} type="button">{label}</button>
           ))}
+          <button className="ghost-button" disabled={loading !== null} onClick={() => refreshProfiles(false)} type="button">{loading === 'profiles' ? 'Refreshing…' : 'Refresh Profiles'}</button>
           <button className="ghost-button" disabled={loading !== null || !playerAProfileId || !playerBProfileId} onClick={swapPlayers} type="button">Swap A/B</button>
         </div>
 
         <div className="editor-card quick-create-card">
           <div>
             <strong>Need another player?</strong>
-            <p>Use Players → Quick Create Player, then return here. The Match Lab list refreshes when this page reloads.</p>
+            <p>Use Players → Quick Create Player, then return here and click Refresh Profiles to load the latest local profiles.</p>
           </div>
           {onOpenPlayers && <button className="ghost-button" onClick={onOpenPlayers} type="button">Quick Create in Players</button>}
         </div>
@@ -588,15 +707,20 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
             </div>
             {setupMessage && <span className="seed-pill">{setupMessage}</span>}
           </div>
-          <div className="form-grid compact-grid">
-            <label className="field-label"><span>Setup label</span><input value={setupLabel} onChange={(event) => setSetupLabel(event.target.value)} placeholder="e.g. Elias home glass court" /></label>
-            <label className="field-label"><span>Load setup</span><select value={selectedSetupId} onChange={(event) => setSelectedSetupId(event.target.value)}><option value="">Choose saved setup…</option>{savedSetups.map((setup) => <option key={setup.id} value={setup.id}>{setup.label}</option>)}</select></label>
-          </div>
-          <div className="button-row match-actions">
-            <button className="ghost-button" onClick={saveSetup} type="button">Save Setup</button>
-            <button className="ghost-button" disabled={!selectedSetupId} onClick={loadSetup} type="button">Load Setup</button>
-            <button className="danger-button" disabled={!selectedSetupId} onClick={deleteSetup} type="button">Delete Setup</button>
-          </div>
+          {!setupStorageReady && <div className="error-banner compact-banner">Favorite setups are unavailable because browser localStorage is blocked or unavailable.</div>}
+          {setupStorageReady && (
+            <>
+              <div className="form-grid compact-grid">
+                <label className="field-label"><span>Setup label</span><input value={setupLabel} onChange={(event) => setSetupLabel(event.target.value)} placeholder="e.g. Elias home glass court" /></label>
+                <label className="field-label"><span>Load setup</span><select value={selectedSetupId} onChange={(event) => setSelectedSetupId(event.target.value)}><option value="">Choose saved setup…</option>{savedSetups.map((setup) => <option key={setup.id} value={setup.id}>{setup.label}</option>)}</select></label>
+              </div>
+              <div className="button-row match-actions">
+                <button className="ghost-button" onClick={saveSetup} type="button">Save Setup</button>
+                <button className="ghost-button" disabled={!selectedSetupId} onClick={loadSetup} type="button">Load Setup</button>
+                <button className="danger-button" disabled={!selectedSetupId} onClick={deleteSetup} type="button">Delete Setup</button>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="button-row match-actions">
@@ -663,7 +787,7 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
             </div>
           </div>
           <div className="form-grid compact-grid">
-            <label className="field-label"><span>Number of matches</span><input max={200} min={5} type="number" value={batchRuns} onChange={(event) => setBatchRuns(Number(event.target.value))} /></label>
+            <label className="field-label"><span>Number of matches</span><input max={200} min={5} type="number" value={batchRuns} onChange={(event) => setBatchRuns(Number(event.target.value))} /><small>20 is recommended for quick local testing. 200 can be slow.</small>{batchRuns > 100 && <small>Warning: more than 100 batch runs may take noticeably longer.</small>}</label>
           </div>
           <button className="primary-button" disabled={loading !== null || profiles.length < 2 || sameProfileSelected} onClick={runBatchSimulation} type="button">{loading === 'batch' ? 'Running batch…' : 'Run Batch Simulation'}</button>
           {batchResult && (

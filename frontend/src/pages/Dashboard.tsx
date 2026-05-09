@@ -168,14 +168,17 @@ export function Dashboard() {
       </div>
 
       <div className="metric-card dev-tools-card">
-        <span>First Run Checklist</span>
-        <strong>Safe local test order</strong>
+        <span>Ready for testing checklist</span>
+        <strong>Manual smoke-test prompts</strong>
         <ol className="compact-list">
           <li>Backend connected</li>
-          <li>Saved matches router ok</li>
-          <li>Elite sample players reset</li>
-          <li>Self-test passed</li>
-          <li>Generate and save one match</li>
+          <li>Profiles loaded</li>
+          <li>Elite sample players available</li>
+          <li>Self-test available</li>
+          <li>Realism report available</li>
+          <li>Can generate Tour BO5</li>
+          <li>Can generate League Timed 3x5</li>
+          <li>Can save match</li>
         </ol>
         <div className="button-row match-actions">
           <button className="ghost-button" onClick={() => runDevCheck(getHealth, 'Backend health')} type="button">1. Backend</button>
