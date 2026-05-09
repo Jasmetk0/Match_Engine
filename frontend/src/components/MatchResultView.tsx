@@ -31,9 +31,17 @@ function profileName(id: number | null, names: Map<number, string>) {
 }
 
 
-function humanContext(context: Record<string, string> | undefined) {
+function humanContext(context: Record<string, unknown> | undefined) {
   if (!context) return 'Not recorded';
-  return Object.entries(context).map(([key, value]) => `${key.replace(/_/g, ' ')}: ${value.replace(/_/g, ' ')}`).join('; ');
+  return Object.entries(context).map(([key, value]) => `${key.replace(/_/g, ' ')}: ${String(value).replace(/_/g, ' ')}`).join('; ');
+}
+
+function scoreText(score: number[] | null | undefined) {
+  return Array.isArray(score) ? score.join('-') : '—';
+}
+
+function valueText(value: unknown, suffix = '') {
+  return value === null || value === undefined || value === '' ? '—' : `${value}${suffix}`;
 }
 
 function matchReport(result: MatchGenerateResponse) {
@@ -44,10 +52,10 @@ function matchReport(result: MatchGenerateResponse) {
   return [
     `MATCH REPORT: ${result.player_a.name} vs ${result.player_b.name}`,
     `Match type: ${result.match_type}`,
-    `Context: ${story.context_summary ?? humanContext(result.match_context as Record<string, string> | undefined)}`,
+    `Context: ${humanContext(result.match_context as Record<string, unknown> | undefined)}`,
     `Seed: ${result.seed}`,
     `Final result: ${result.is_draw || !result.winner ? 'Draw' : `${result.winner.name} defeated ${result.loser?.name ?? 'opponent'}`} ${result.match_score_text}`,
-    `Game/set scores: ${result.games.map((g) => `${g.score[0]}-${g.score[1]}`).join(', ')}`,
+    `Game/set scores: ${(result.games ?? []).map((g) => scoreText(g.score)).join(', ') || 'Not recorded.'}`,
     `Clean time: ${minutes(stats.clean_rally_time_seconds ?? stats.total_duration_seconds)}; broadcast estimate: ${minutes(stats.estimated_broadcast_duration_seconds)}`,
     `Key stats: total points ${totalPoints(result)}, average rally ${stats.average_rally_shots ?? '—'} shots, winners ${statPair(stats.winners)}, errors ${statPair(stats.unforced_errors_committed)}.`,
     '',
@@ -58,7 +66,7 @@ function matchReport(result: MatchGenerateResponse) {
     Object.entries(why).map(([key, value]) => `- ${key.replace(/_/g, ' ')}: ${value}`).join('\n') || 'Not recorded.',
     '',
     'Key rallies:',
-    keyRallies.map((rally) => `- ${rally.reason}: Game ${rally.game_number}, Rally ${rally.rally_number}, ${Array.isArray(rally.score_before) ? rally.score_before.join('-') : '—'} before; ${rally.winner} won by ${rally.terminal_type} after ${rally.rally_shots} shots (${rally.rally_duration_seconds}s). ${rally.explanation}`).join('\n') || 'Not recorded.',
+    keyRallies.map((rally) => `- ${rally.reason || 'Key moment'}: Game ${valueText(rally.game_number)}, Rally ${valueText(rally.rally_number)}, ${scoreText(rally.score_before)} before; ${valueText(rally.winner)} won by ${valueText(rally.terminal_type)} after ${valueText(rally.rally_shots)} shots (${valueText(rally.rally_duration_seconds, 's')}). ${rally.explanation ?? ''}`.trim()).join('\n') || 'Not recorded.',
   ].join('\n');
 }
 
@@ -80,7 +88,9 @@ export function MatchResultView({ result, label = 'Match result', defaultRallyOp
   const stats = result.stats ?? {};
   const story = result.story ?? {};
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
-  const hasClock = result.rallies.some((rally) => rally.game_clock_before_seconds !== undefined);
+  const rallies = result.rallies ?? [];
+  const games = result.games ?? [];
+  const hasClock = rallies.some((rally) => rally.game_clock_before_seconds !== undefined);
   const headline = result.is_draw || !result.winner ? `Match drawn ${result.match_score_text}` : `${result.winner.name} wins ${result.match_score_text}`;
   const winnerRating = result.winner ? stats.performance_rating?.[String(result.winner.profile_id)] : undefined;
   const loserRating = result.loser ? stats.performance_rating?.[String(result.loser.profile_id)] : undefined;
@@ -122,10 +132,10 @@ export function MatchResultView({ result, label = 'Match result', defaultRallyOp
         <div className="match-meta-line">
           <span>{result.match_type}</span>
           <span>{result.player_a.name} vs {result.player_b.name}</span>
-          <span>Context: {story.context_summary ?? humanContext(result.match_context as Record<string, string> | undefined)}</span>
+          <span>Context: {story.context_summary ?? humanContext(result.match_context as Record<string, unknown> | undefined)}</span>
         </div>
         <div className="scoreline-grid game-score-grid">
-          {result.games.map((game) => <span key={game.game_number}>Game {game.game_number}: {game.score[0]}-{game.score[1]} · {game.is_draw ? 'Drawn set' : profileName(game.winner_profile_id, names)}{game.duration_seconds ? ` · ${game.duration_seconds.toFixed(1)}s clean` : ''}</span>)}
+          {games.map((game) => <span key={game.game_number}>Game {game.game_number}: {scoreText(game.score)} · {game.is_draw ? 'Drawn set' : profileName(game.winner_profile_id, names)}{game.duration_seconds ? ` · ${game.duration_seconds.toFixed(1)}s clean` : ''}</span>)}
         </div>
         <div className="ratings-grid">
           <div className="rating-card"><span>Clean time</span><strong>{minutes(stats.clean_rally_time_seconds ?? stats.total_duration_seconds)}</strong></div>
@@ -158,7 +168,7 @@ export function MatchResultView({ result, label = 'Match result', defaultRallyOp
             {result.winner && <span>Winner / loser performance: <strong>{winnerRating ?? '—'} / {loserRating ?? '—'}</strong></span>}
             <span>Fatigue final: <strong>{namedPair(stats.fatigue_final, names)}</strong></span>
             <span>Styles: <strong>{result.player_a.name}: {result.player_a.play_style} / {result.player_b.name}: {result.player_b.play_style}</strong></span>
-            <span>Context: <strong>{story.context_summary ?? humanContext(result.match_context as Record<string, string> | undefined)}</strong></span>
+            <span>Context: <strong>{story.context_summary ?? humanContext(result.match_context as Record<string, unknown> | undefined)}</strong></span>
             {stats.points_per_minute !== undefined && <span>Points per minute: <strong>{stats.points_per_minute}</strong></span>}
             {stats.drawn_sets !== undefined && <span>Drawn sets: <strong>{stats.drawn_sets}</strong></span>}
             {stats.final_minute_points_won && <span>Final minute points: <strong>{namedPair(stats.final_minute_points_won, names)}</strong></span>}
@@ -192,7 +202,7 @@ export function MatchResultView({ result, label = 'Match result', defaultRallyOp
             <summary>Key Rallies</summary>
             <div className="rally-table-wrap">
               <table className="rally-table"><thead><tr><th>Reason</th><th>Game</th><th>Rally</th><th>Before</th><th>Winner</th><th>Terminal</th><th>Shots</th><th>Duration</th><th>Explanation</th></tr></thead><tbody>
-                {result.key_rallies.map((rally, index) => <tr key={`${rally.game_number}-${rally.rally_number}-${index}`}><td>{rally.reason}</td><td>{rally.game_number}</td><td>{rally.rally_number}</td><td>{Array.isArray(rally.score_before) ? rally.score_before.join('-') : '—'}</td><td>{rally.winner}</td><td>{rally.terminal_type}</td><td>{rally.rally_shots}</td><td>{rally.rally_duration_seconds}s</td><td>{rally.explanation}</td></tr>)}
+                {result.key_rallies.map((rally, index) => <tr key={`${rally.game_number ?? 'game'}-${rally.rally_number ?? 'rally'}-${index}`}><td>{rally.reason || 'Key moment'}</td><td>{valueText(rally.game_number)}</td><td>{valueText(rally.rally_number)}</td><td>{scoreText(rally.score_before)}</td><td>{valueText(rally.winner)}</td><td>{valueText(rally.terminal_type)}</td><td>{valueText(rally.rally_shots)}</td><td>{valueText(rally.rally_duration_seconds, 's')}</td><td>{rally.explanation ?? '—'}</td></tr>)}
               </tbody></table>
             </div>
           </details>
@@ -200,7 +210,7 @@ export function MatchResultView({ result, label = 'Match result', defaultRallyOp
       </div>
 
       <details className="editor-card rally-log" open={defaultRallyOpen}>
-        <summary>Full rally log ({result.rallies.length} events)</summary>
+        <summary>Full rally log ({rallies.length} events)</summary>
         <div className="rally-table-wrap">
           <table className="rally-table">
             <thead>
@@ -209,11 +219,11 @@ export function MatchResultView({ result, label = 'Match result', defaultRallyOp
               </tr>
             </thead>
             <tbody>
-              {result.rallies.map((rally, index) => (
+              {rallies.map((rally, index) => (
                 <tr key={`${rally.game_number}-${rally.rally_number}-${rally.terminal_type}-${index}`}>
                   <td>{rally.game_number}</td>
                   <td>{rally.rally_number}</td>
-                  <td>{rally.score_before.join('-')}</td>
+                  <td>{scoreText(rally.score_before)}</td>
                   <td>{rally.terminal_type === 'let_replayed' ? 'Let' : profileName(rally.winner_profile_id, names)}</td>
                   {hasClock && <td>{rally.game_clock_before_seconds?.toFixed(1)}s</td>}
                   {hasClock && <td>{rally.game_clock_after_seconds?.toFixed(1)}s</td>}

@@ -51,6 +51,38 @@ function contextText(context: MatchContext | undefined) {
   return [ctx.event_importance, ctx.court_type, ctx.crowd_environment, ctx.rest_context, ctx.travel_context, ctx.pressure_context].map((key) => LABELS[key]).join(' · ');
 }
 
+function isNeutralContext(context: MatchContext | undefined) {
+  const ctx = context ?? DEFAULT_CONTEXT;
+  return ctx.event_importance === DEFAULT_CONTEXT.event_importance
+    && ctx.court_type === DEFAULT_CONTEXT.court_type
+    && ctx.crowd_environment === DEFAULT_CONTEXT.crowd_environment
+    && ctx.rest_context === DEFAULT_CONTEXT.rest_context
+    && ctx.travel_context === DEFAULT_CONTEXT.travel_context
+    && ctx.pressure_context === DEFAULT_CONTEXT.pressure_context;
+}
+
+function contextHelperText(context: MatchContext | undefined) {
+  return isNeutralContext(context)
+    ? 'Neutral baseline context.'
+    : 'Context active: this may subtly affect pressure, fatigue, rally length or pace.';
+}
+
+function titleContextTag(context: MatchContext | undefined) {
+  if (!context) return '';
+  if (context.event_importance === 'world_championship' && (context.pressure_context === 'legacy_match' || context.court_type === 'glass_court')) return ' · World Championship Final';
+  if (context.event_importance === 'world_championship') return ' · World Championship';
+  if (context.event_importance === 'final') return ' · Final';
+  if (context.event_importance === 'rivalry') return ' · Rivalry';
+  return '';
+}
+
+function previewContextEdgeText(preview: MatchPreviewResponse) {
+  const edges = [preview.context_edge, preview.pressure_edge, preview.fatigue_edge].map((value) => value ?? 0);
+  if (edges.every((value) => Math.abs(value) < 0.01)) return 'Context edge is neutral.';
+  const totalEdge = edges.reduce((sum, value) => sum + value, 0);
+  return `Context edge favors ${totalEdge >= 0 ? preview.player_a.name : preview.player_b.name} slightly.`;
+}
+
 type ProfileOption = SeasonProfile & { playerName: string };
 
 function pct(value: number | null | undefined) {
@@ -154,8 +186,10 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
 
 
   function autoTitle(match: MatchGenerateResponse) {
-    if (!match.winner || !match.loser || match.is_draw) return `${match.player_a.name} drew ${match.player_b.name} ${match.match_score_text} · ${match.player_a.season_year} League Timed 3x5`;
-    return `${match.winner.name} def. ${match.loser.name} ${match.match_score_text.split(' ')[0]} · ${match.player_a.season_year} ${match.match_type === 'league_timed_3x5' ? 'League Timed 3x5' : 'Tour BO5'}`;
+    const format = match.match_type === 'league_timed_3x5' ? 'League Timed 3x5' : 'Tour BO5';
+    const tag = titleContextTag(match.match_context);
+    if (!match.winner || !match.loser || match.is_draw) return `${match.player_a.name} drew ${match.player_b.name} ${match.match_score_text} · ${match.player_a.season_year} ${format}${tag}`;
+    return `${match.winner.name} def. ${match.loser.name} ${match.match_score_text.split(' ')[0]} · ${match.player_a.season_year} ${format}${tag}`;
   }
 
   async function saveGeneratedMatch() {
@@ -209,6 +243,13 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
     const nextSeed = randomSeed();
     setSeed(nextSeed);
     await generate(nextSeed);
+  }
+
+
+  function resetContext() {
+    setMatchContext(DEFAULT_CONTEXT);
+    clearGeneratedState();
+    setError(null);
   }
 
 
@@ -286,8 +327,10 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
         <details className="diagnostics-panel context-control-panel" open>
           <summary>Match Context</summary>
           <p className="helper-text">Context changes should be subtle. Player attributes still dominate.</p>
+          <p className="helper-text">{contextHelperText(matchContext)}</p>
           <div className="button-row match-actions scenario-row">
             <span className="seed-pill">Scenario Preset:</span>
+            <button className="ghost-button" onClick={resetContext} type="button">Reset Context</button>
             {SCENARIOS.map((scenario) => (
               <button className="ghost-button" key={scenario.label} onClick={() => { setMatchContext(scenario.context); clearGeneratedState(); }} type="button">{scenario.label}</button>
             ))}
@@ -379,6 +422,8 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
             <div className="match-meta-line"><span>Context: {preview.context_summary ?? contextText(preview.match_context)}</span></div>
             <div className="story-box pre-match-intel">
               <h3>Pre-match Intelligence</h3>
+              <p><strong>Context:</strong> {preview.context_summary ?? contextText(preview.match_context)}</p>
+              <p>{previewContextEdgeText(preview)}</p>
               <div className="scoreline-grid">
                 <span>Rating edge: {preview.rating_edge ?? '—'}</span><span>Style edge: {String(preview.style_edge ?? '—')}</span><span>Context edge: {preview.context_edge ?? '—'}</span><span>Pressure edge: {preview.pressure_edge ?? '—'}</span><span>Fatigue edge: {preview.fatigue_edge ?? '—'}</span><span>Volatility: {preview.volatility_index ?? '—'}</span><span>Closeness: {preview.expected_closeness ?? '—'}</span><span>Upset estimate: {pct(preview.upset_probability_estimate)}</span>
                 {preview.expected_long_rally_share !== undefined && <span>Long-rally share: {pct(preview.expected_long_rally_share)}</span>}

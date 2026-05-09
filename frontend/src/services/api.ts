@@ -329,7 +329,17 @@ export type GameSummary = {
   lead_changes?: number;
 };
 
-export type KeyRally = RallyEvent & { reason: string; winner: string };
+export type KeyRally = {
+  reason: string;
+  game_number?: number;
+  rally_number?: number;
+  score_before?: [number, number] | number[] | null;
+  winner?: string;
+  terminal_type?: string;
+  rally_shots?: number;
+  rally_duration_seconds?: number;
+  explanation?: string;
+};
 
 export type MatchGenerateResponse = {
   match_type: string;
