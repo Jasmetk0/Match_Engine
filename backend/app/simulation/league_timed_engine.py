@@ -24,6 +24,19 @@ from app.simulation.calibration import (
     volatility_index,
 )
 from app.simulation.match_types import MatchPlayer, MatchState
+from app.simulation.match_context import (
+    context_edges,
+    context_summary,
+    fatigue_cost_multiplier,
+    initial_fatigue,
+    normalize_match_context,
+    player_context_modifier,
+    pressure_risk_adjustment,
+    rally_length_adjustments,
+    terminal_adjustment,
+    tactical_preview,
+    volatility_boost,
+)
 from app.simulation.tour_match_engine import child_seed, clamp
 
 SCHEDULED_SET_SECONDS = 300
@@ -104,7 +117,7 @@ def _mentality(player: MatchPlayer, pressure: str, trailing: bool) -> tuple[floa
     return base, volatility
 
 
-def _effective(player: MatchPlayer, fatigue: float, area: str, pressure: str, trailing: bool, game_no: int) -> float:
+def _effective(player: MatchPlayer, fatigue: float, area: str, pressure: str, trailing: bool, game_no: int, match_context: dict[str, Any] | None = None, player_slot: str = "a") -> float:
     attrs = player.attributes
     if area == "pace_attack":
         raw = attrs["volley_takeover"] * 0.22 + attrs["front_court_touch"] * 0.19 + attrs["finishing_power"] * 0.24 + attrs["first_step_cod"] * 0.16 + attrs["shot_selection"] * 0.10 + attrs["deception_creativity"] * 0.09 + _style(player, "quick") + _style(player, "attack")
@@ -122,24 +135,25 @@ def _effective(player: MatchPlayer, fatigue: float, area: str, pressure: str, tr
         raw += quality * ELITE_QUALITY["pressure_logic_bonus"] * 0.8
     third = _style(player, "third_set") if game_no == 3 else 0.0
     form = (player.form - 50) * 0.045 + (player.confidence - 50) * 0.055
-    return raw + bonus + third + form - fatigue * 0.105
+    return raw + bonus + third + form + player_context_modifier(player, player_slot, match_context, area, pressure, trailing) - fatigue * 0.105
 
 
-def _length_type(rng: random.Random, a: MatchPlayer, b: MatchPlayer, initiative: MatchPlayer, chasing: bool) -> str:
+def _length_type(rng: random.Random, a: MatchPlayer, b: MatchPlayer, initiative: MatchPlayer, chasing: bool, match_context: dict[str, Any] | None = None) -> str:
     quick_bias = _style(initiative, "quick") + initiative.attr("volley_takeover") * 0.04 + initiative.attr("finishing_power") * 0.035
     if chasing:
         quick_bias += 4.0
     quality_pair = pair_quality(a, b, "league_rating")
     long_bias = (a.attr("aerobic_repeatability") + b.attr("aerobic_repeatability")) * 0.035 + _style(a, "long") + _style(b, "long")
-    return _weighted_pick(rng, [("short", LEAGUE_RALLY_LENGTH_WEIGHTS["short"] + quick_bias), ("medium", LEAGUE_RALLY_LENGTH_WEIGHTS["medium"] + quality_pair * 1.0), ("long", LEAGUE_RALLY_LENGTH_WEIGHTS["long"] + long_bias * 0.45 + quality_pair * 0.7), ("brutal", LEAGUE_RALLY_LENGTH_WEIGHTS["brutal"] + long_bias * 0.12 + quality_pair * 0.2)])
+    adj = rally_length_adjustments(match_context)
+    return _weighted_pick(rng, [("short", LEAGUE_RALLY_LENGTH_WEIGHTS["short"] + adj["short"] + quick_bias), ("medium", LEAGUE_RALLY_LENGTH_WEIGHTS["medium"] + adj["medium"] + quality_pair * 1.0), ("long", LEAGUE_RALLY_LENGTH_WEIGHTS["long"] + adj["long"] + long_bias * 0.45 + quality_pair * 0.7), ("brutal", LEAGUE_RALLY_LENGTH_WEIGHTS["brutal"] + adj["brutal"] + long_bias * 0.12 + quality_pair * 0.2)])
 
 
-def _apply_fatigue(a: MatchPlayer, b: MatchPlayer, state: MatchState, shots: int, duration: float, length_type: str, t_control_id: int, loser_id: int | None) -> None:
+def _apply_fatigue(a: MatchPlayer, b: MatchPlayer, state: MatchState, shots: int, duration: float, length_type: str, t_control_id: int, loser_id: int | None, match_context: dict[str, Any] | None = None) -> None:
     config = FATIGUE_ACCUMULATION["league"]
     multiplier = config[length_type]
     for p in (a, b):
         attr_resist = p.attr("aerobic_repeatability") * 0.25 + p.attr("recovery_efficiency") * 0.18 + p.attr("durability") * 0.22 + p.attr("first_step_cod") * 0.15
-        base = (duration * config["duration"] + shots * config["shots"]) * multiplier
+        base = (duration * config["duration"] + shots * config["shots"]) * multiplier * fatigue_cost_multiplier(match_context, length_type)
         scramble = config["scramble"] if p.profile_id != t_control_id else 0.0
         losing_burden = config["losing"] if loser_id and p.profile_id == loser_id else 0.0
         injury = INJURY_FATIGUE.get(p.injury_status, 0.0) * 0.012
@@ -160,7 +174,7 @@ def _pattern(player: MatchPlayer, terminal: str, length_type: str, had_t: bool) 
     return "serve_pressure_start" if length_type == "short" else "deep_length_exchange"
 
 
-def _simulate_rally(rng: random.Random, a: MatchPlayer, b: MatchPlayer, state: MatchState, server_id: int, game_no: int, rally_no: int, score_before: list[int], clock_before: float, force_playable: bool) -> dict[str, Any]:
+def _simulate_rally(rng: random.Random, a: MatchPlayer, b: MatchPlayer, state: MatchState, server_id: int, game_no: int, rally_no: int, score_before: list[int], clock_before: float, force_playable: bool, match_context: dict[str, Any] | None = None) -> dict[str, Any]:
     players = {a.profile_id: a, b.profile_id: b}
     opponent = {a.profile_id: b.profile_id, b.profile_id: a.profile_id}
     a_trailing = score_before[0] < score_before[1]
@@ -172,15 +186,15 @@ def _simulate_rally(rng: random.Random, a: MatchPlayer, b: MatchPlayer, state: M
     initiative_id = server_id if rng.random() < clamp(0.52 + (serve_edge - return_edge) / 150, 0.31, 0.73) else receiver.profile_id
     initiative = players[initiative_id]
     context = _point_rate_context(score_before[0], score_before[1], initiative_id, a.profile_id, b.profile_id, clock_before)
-    length_type = _length_type(rng, a, b, initiative, context in {"chasing", "must_score"})
+    length_type = _length_type(rng, a, b, initiative, context in {"chasing", "must_score"}, match_context)
     lo, hi = LEAGUE_RALLY_SHOT_RANGES[length_type]
     shots = rng.randint(lo, hi)
     duration = round(shots * rng.uniform(*LEAGUE_SECONDS_PER_SHOT_RANGE), 1)
     clock_after = round(clock_before + duration, 1)
     pressure = _pressure(score_before[0], score_before[1], clock_before, clock_after)
 
-    control_a = _effective(a, state.fatigue[a.profile_id], "control", pressure, a_trailing, game_no) + (3.3 if initiative_id == a.profile_id else 0)
-    control_b = _effective(b, state.fatigue[b.profile_id], "control", pressure, b_trailing, game_no) + (3.3 if initiative_id == b.profile_id else 0)
+    control_a = _effective(a, state.fatigue[a.profile_id], "control", pressure, a_trailing, game_no, match_context, "a") + (3.3 if initiative_id == a.profile_id else 0)
+    control_b = _effective(b, state.fatigue[b.profile_id], "control", pressure, b_trailing, game_no, match_context, "b") + (3.3 if initiative_id == b.profile_id else 0)
     t_control_id = a.profile_id if rng.random() < clamp(0.5 + (control_a - control_b) / 125, 0.25, 0.75) else b.profile_id
 
     if not force_playable and rng.random() < clamp(0.009 + (abs(control_a - control_b) < 5) * 0.005, 0.004, 0.020):
@@ -190,30 +204,30 @@ def _simulate_rally(rng: random.Random, a: MatchPlayer, b: MatchPlayer, state: M
     scores: dict[int, float] = {}
     candidate_terms: dict[int, str] = {}
     for p, opp, trailing in [(a, b, a_trailing), (b, a, b_trailing)]:
-        attack = _effective(p, state.fatigue[p.profile_id], "pace_attack", pressure, trailing, game_no)
-        defense = _effective(p, state.fatigue[p.profile_id], "defense", pressure, trailing, game_no)
-        discipline = _effective(p, state.fatigue[p.profile_id], "discipline", pressure, trailing, game_no)
+        attack = _effective(p, state.fatigue[p.profile_id], "pace_attack", pressure, trailing, game_no, match_context, "a" if p.profile_id == a.profile_id else "b")
+        defense = _effective(p, state.fatigue[p.profile_id], "defense", pressure, trailing, game_no, match_context, "a" if p.profile_id == a.profile_id else "b")
+        discipline = _effective(p, state.fatigue[p.profile_id], "discipline", pressure, trailing, game_no, match_context, "a" if p.profile_id == a.profile_id else "b")
         ctx = _point_rate_context(score_before[0], score_before[1], p.profile_id, a.profile_id, b.profile_id, clock_before)
         risk = 3.5 if ctx in {"chasing", "must_score"} else (-1.2 if ctx == "protecting_lead" and _style(p, "protect") > 0 else 0.0)
         volatile = _style(p, "volatility") + _mentality(p, pressure, trailing)[1]
         tired_target = max(0.0, state.fatigue[opp.profile_id] - state.fatigue[p.profile_id]) * (0.04 + _style(p, "tired_target") * 0.008)
         scores[p.profile_id] = attack * 0.38 + defense * 0.17 + discipline * 0.19 + p.rating("league_rating") * 0.16 + p.rating("mental_rating") * 0.10 + (4 if initiative_id == p.profile_id else 0) + (4.5 if t_control_id == p.profile_id else -1) + risk + tired_target + (_style(p, "pressure") if pressure != "normal" else 0.0)
         base_rates = TERMINAL_EVENT_BASE_RATES["league"]
-        candidate_terms[p.profile_id] = _weighted_pick(rng, [("winner", base_rates["winner"] + attack * 0.43 + risk * 1.8 + volatile), ("forced_error", base_rates["forced_error"] + attack * 0.12 + defense * 0.18), ("stroke", base_rates["stroke"] + (4.0 if t_control_id == p.profile_id and length_type == "short" else 0))])
+        candidate_terms[p.profile_id] = _weighted_pick(rng, [("winner", base_rates["winner"] + attack * 0.43 + risk * 1.8 + volatile + terminal_adjustment(match_context, "winner")), ("forced_error", base_rates["forced_error"] + attack * 0.12 + defense * 0.18 + terminal_adjustment(match_context, "forced_error")), ("stroke", base_rates["stroke"] + (4.0 if t_control_id == p.profile_id and length_type == "short" else 0))])
     a_prob = clamp(0.5 + (scores[a.profile_id] - scores[b.profile_id]) / 90, 0.15, 0.85)
     winner_id = a.profile_id if rng.random() < a_prob else b.profile_id
     loser_id = opponent[winner_id]
     loser = players[loser_id]
     loser_trailing = loser_id == a.profile_id and a_trailing or loser_id == b.profile_id and b_trailing
-    loser_disc = _effective(loser, state.fatigue[loser_id], "discipline", pressure, loser_trailing, game_no)
+    loser_disc = _effective(loser, state.fatigue[loser_id], "discipline", pressure, loser_trailing, game_no, match_context, "a" if loser_id == a.profile_id else "b")
     loser_ctx = _point_rate_context(score_before[0], score_before[1], loser_id, a.profile_id, b.profile_id, clock_before)
     pressure_error = {"normal": 0, "important": 2.5, "final_minute": 5.5, "must_score": 8.0, "set_point_equivalent": 7.0}[pressure]
     chase_risk = 5.0 if loser_ctx in {"chasing", "must_score"} else 0.0
     elite_suppression = elite_modifier(loser, "league_rating") * ELITE_QUALITY["error_suppression"] * 0.75
-    error_prob = clamp((19 - loser_disc * 0.13 + state.fatigue[loser_id] * 0.045 + _style(loser, "risk") * 1.9 + max(0.0, _style(loser, "volatility") - elite_suppression * 2.0) + pressure_error + chase_risk) / 100, TERMINAL_EVENT_BASE_RATES["league"]["unforced_error_floor"], TERMINAL_EVENT_BASE_RATES["league"]["unforced_error_cap"] - elite_suppression * 0.04)
+    error_prob = clamp((19 - loser_disc * 0.13 + state.fatigue[loser_id] * 0.045 + _style(loser, "risk") * 1.9 + max(0.0, _style(loser, "volatility") - elite_suppression * 2.0) + pressure_error + chase_risk + pressure_risk_adjustment(match_context, pressure) + volatility_boost(match_context)) / 100, TERMINAL_EVENT_BASE_RATES["league"]["unforced_error_floor"], TERMINAL_EVENT_BASE_RATES["league"]["unforced_error_cap"] - elite_suppression * 0.04)
     terminal = "unforced_error" if rng.random() < error_prob else candidate_terms[winner_id]
     pattern = "pressure_error" if terminal == "unforced_error" else _pattern(players[winner_id], terminal, length_type, t_control_id == winner_id)
-    _apply_fatigue(a, b, state, shots, duration, length_type, t_control_id, loser_id)
+    _apply_fatigue(a, b, state, shots, duration, length_type, t_control_id, loser_id, match_context)
     if state.point_streak_profile_id == winner_id:
         state.point_streak_count += 1
     else:
@@ -269,9 +283,10 @@ def _blank_stats(a: MatchPlayer, b: MatchPlayer) -> dict[str, Any]:
     }
 
 
-def simulate_league_timed_match(a: MatchPlayer, b: MatchPlayer, seed: int, include_rallies: bool = True) -> dict[str, Any]:
+def simulate_league_timed_match(a: MatchPlayer, b: MatchPlayer, seed: int, include_rallies: bool = True, match_context: dict[str, Any] | None = None) -> dict[str, Any]:
     rng = random.Random(seed)
-    state = MatchState(fatigue={a.profile_id: float(a.starting_fatigue), b.profile_id: float(b.starting_fatigue)}, games_won={a.profile_id: 0, b.profile_id: 0}, points_won={a.profile_id: 0, b.profile_id: 0})
+    match_context = normalize_match_context(match_context)
+    state = MatchState(fatigue={a.profile_id: initial_fatigue(a, "a", match_context), b.profile_id: initial_fatigue(b, "b", match_context)}, games_won={a.profile_id: 0, b.profile_id: 0}, points_won={a.profile_id: 0, b.profile_id: 0})
     players = {a.profile_id: a, b.profile_id: b}
     opponent = {a.profile_id: b.profile_id, b.profile_id: a.profile_id}
     server_id = a.profile_id if rng.random() < 0.5 else b.profile_id
@@ -290,7 +305,7 @@ def simulate_league_timed_match(a: MatchPlayer, b: MatchPlayer, seed: int, inclu
         max_let_chain = 0
         while clock < SCHEDULED_SET_SECONDS:
             before_score = [a_points, b_points]
-            rally = _simulate_rally(rng, a, b, state, server_id, game_no, rally_number + 1, before_score, clock, max_let_chain >= 2)
+            rally = _simulate_rally(rng, a, b, state, server_id, game_no, rally_number + 1, before_score, clock, max_let_chain >= 2, match_context)
             rally_number += 1
             clock = rally["game_clock_after_seconds"]
             if include_rallies:
@@ -361,7 +376,8 @@ def simulate_league_timed_match(a: MatchPlayer, b: MatchPlayer, seed: int, inclu
         stats["fatigue_change_by_set"].append({str(pid): round(state.fatigue[pid] - fatigue_start[pid], 1) for pid in state.fatigue})
         server_id = opponent[winner_id] if winner_id else opponent[server_id]
         for pid, p in players.items():
-            recovery = FATIGUE_RECOVERY["league_between_sets_base"] + p.attr("recovery_efficiency") * FATIGUE_RECOVERY["league_recovery_efficiency_factor"] + _style(p, "fatigue") * -0.8
+            travel_penalty = 0.35 if (match_context["travel_context"] == "player_a_travel_fatigue" and pid == a.profile_id) or (match_context["travel_context"] == "player_b_travel_fatigue" and pid == b.profile_id) else 0.0
+            recovery = FATIGUE_RECOVERY["league_between_sets_base"] + p.attr("recovery_efficiency") * FATIGUE_RECOVERY["league_recovery_efficiency_factor"] + _style(p, "fatigue") * -0.8 - travel_penalty
             state.fatigue[pid] = max(float(p.starting_fatigue) * FATIGUE_RECOVERY["league_starting_fatigue_floor"], state.fatigue[pid] - recovery)
     a_sets = state.games_won[a.profile_id]; b_sets = state.games_won[b.profile_id]
     winner_id = a.profile_id if a_sets > b_sets else b.profile_id if b_sets > a_sets else None
@@ -387,10 +403,10 @@ def simulate_league_timed_match(a: MatchPlayer, b: MatchPlayer, seed: int, inclu
     fatigue_impact = sum(stats["fatigue_final"].values()) / max(len(stats["fatigue_final"]), 1)
     pressure_total = sum(stats["clock_pressure_points_won"].values()) or 1
     pressure_impact = abs(stats["clock_pressure_points_won"][str(a.profile_id)] - stats["clock_pressure_points_won"][str(b.profile_id)]) / pressure_total
-    return {"match_type": "league_timed_3x5", "seed": seed, "player_a": a.public_dict(), "player_b": b.public_dict(), "winner": players[winner_id].public_dict() if winner_id else None, "loser": players[opponent[winner_id]].public_dict() if winner_id else None, "is_draw": winner_id is None, "match_score_text": match_score_text, "games": games, "rallies": rallies if include_rallies else [], "stats": stats, "story": _story(a, b, winner_id, games, stats), "calibration_debug": calibration_debug(a, b, match_type="league_timed_3x5", fatigue_impact=fatigue_impact, pressure_impact=pressure_impact)}
+    return {"match_type": "league_timed_3x5", "seed": seed, "player_a": a.public_dict(), "player_b": b.public_dict(), "winner": players[winner_id].public_dict() if winner_id else None, "loser": players[opponent[winner_id]].public_dict() if winner_id else None, "is_draw": winner_id is None, "match_score_text": match_score_text, "games": games, "rallies": rallies if include_rallies else [], "stats": stats, "story": _story(a, b, winner_id, games, stats, match_context), "match_context": match_context, "explanation_breakdown": _explanation_breakdown_league(a, b, winner_id, stats, games, match_context), "key_rallies": _key_rallies_league(rallies, games, a, b) if include_rallies else [], "calibration_debug": calibration_debug(a, b, match_type="league_timed_3x5", fatigue_impact=fatigue_impact, pressure_impact=pressure_impact)}
 
 
-def _story(a: MatchPlayer, b: MatchPlayer, winner_id: int | None, games: list[dict[str, Any]], stats: dict[str, Any]) -> dict[str, str]:
+def _story(a: MatchPlayer, b: MatchPlayer, winner_id: int | None, games: list[dict[str, Any]], stats: dict[str, Any], match_context: dict[str, Any] | None = None) -> dict[str, str]:
     if winner_id is None:
         headline = f"{a.name} and {b.name} draw a League Timed 3x5 match."
         key = "Neither player could turn the three timed sets into a decisive set-wins edge."
@@ -409,17 +425,19 @@ def _story(a: MatchPlayer, b: MatchPlayer, winner_id: int | None, games: list[di
         "final_minute_summary": f"Clock-pressure points finished {stats['clock_pressure_points_won'][str(a.profile_id)]}-{stats['clock_pressure_points_won'][str(b.profile_id)]}.",
         "fatigue_summary": f"Final fatigue was {stats['fatigue_final'][str(a.profile_id)]} for {a.name} and {stats['fatigue_final'][str(b.profile_id)]} for {b.name}; endurance mattered less than in BO5, with explosive styles paying more in repeated fast exchanges.",
         "pressure_summary": "Final-minute, narrow-lead, must-score and set-point-equivalent states use league-specific mentality modifiers, so chasing can get risky without turning elite pressure points into chaos.",
-        "explanation": "The simulation resolved every timed rally through pace attack, T control, clock context, risk while chasing, lead protection, fatigue and pressure modifiers.",
+        "context_summary": context_summary(match_context),
+        "explanation": "The simulation resolved every timed rally through pace attack, T control, clock context, risk while chasing, lead protection, fatigue, pressure and subtle match-context modifiers.",
     }
 
 
-def preview_league_probabilities(a: MatchPlayer, b: MatchPlayer, seed: int, runs: int) -> dict[str, Any]:
+def preview_league_probabilities(a: MatchPlayer, b: MatchPlayer, seed: int, runs: int, match_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    match_context = normalize_match_context(match_context)
     wins = {a.profile_id: 0, b.profile_id: 0, None: 0}
     a30 = a21 = b30 = b21 = one_draw = multi_draw = final_decider = 0
     total_points = total_duration = total_rallies = ppm = 0.0
     set_scores = [[0.0, 0.0] for _ in range(3)]
     for index in range(runs):
-        result = simulate_league_timed_match(a, b, child_seed(seed, index), include_rallies=False)
+        result = simulate_league_timed_match(a, b, child_seed(seed, index), include_rallies=False, match_context=match_context)
         winner = result["winner"]["profile_id"] if result["winner"] else None
         wins[winner] += 1
         aw = result["stats"]["sets_won"][str(a.profile_id)]; bw = result["stats"]["sets_won"][str(b.profile_id)]
@@ -440,4 +458,67 @@ def preview_league_probabilities(a: MatchPlayer, b: MatchPlayer, seed: int, runs
     pace_b = b.attr("volley_takeover") * .25 + b.attr("front_court_touch") * .2 + b.attr("finishing_power") * .22 + b.attr("first_step_cod") * .18 + b.attr("deception_creativity") * .15 + _style(b, "quick")
     leader = a.name if pace_a >= pace_b else b.name
     rating_diff = a.rating("league_rating") - b.rating("league_rating")
-    return {"match_type": "league_timed_3x5", "seed": seed, "monte_carlo_runs": runs, "player_a": a.public_dict(), "player_b": b.public_dict(), "player_a_win_probability": wins[a.profile_id]/runs, "player_b_win_probability": wins[b.profile_id]/runs, "draw_probability": wins[None]/runs, "player_a_3_0_sets": a30/runs, "player_a_2_1_sets": a21/runs, "player_b_3_0_sets": b30/runs, "player_b_2_1_sets": b21/runs, "one_drawn_set_probability": one_draw/runs, "two_or_more_drawn_sets_probability": multi_draw/runs, "match_draw_probability": wins[None]/runs, "expected_total_points": round(total_points/runs,1), "expected_total_duration_seconds": round(total_duration/runs,1), "expected_total_rallies": round(total_rallies/runs,1), "expected_points_per_minute": round(ppm/runs,2), "expected_set_scores": [[round(x/runs,1), round(y/runs,1)] for x,y in set_scores], "final_minute_decider_probability": final_decider/runs, "style_edge_summary": f"{a.name} brings {a.play_style}; {b.name} brings {b.play_style}. League timing rewards fast starts, quick finishing, controlled protection of leads and useful volatility more than Tour BO5.", "pace_edge_summary": f"{leader} has the stronger timed-format pace profile ({abs(pace_a-pace_b):.1f} point edge)." if abs(pace_a-pace_b) >= 2.5 else "Pace tools are close enough that clock management may matter more than raw speed.", "pressure_edge_summary": f"Mental ratings are {a.rating('mental_rating'):.1f}-{b.rating('mental_rating'):.1f}; final-minute and must-score rallies receive league-specific pressure weighting.", "league_suitability_summary": f"Timed 3x5 boosts volley pressure, front-court finishing and first-step speed while reducing the BO5 endurance premium.", "preview_diagnostics": {"rating_edge": round(rating_diff, 2), "style_edge": style_edge(a, b, league=True), "format_edge": "League Timed 3x5 leans toward quick initiative, front-court invention, pace and closing discipline.", "volatility_estimate": volatility_index(a, b, league=True), "expected_closeness": round(1 - min(abs(rating_diff) / 24, 1), 2)}}
+    ctx_edges = context_edges(a, b, match_context)
+    pa = wins[a.profile_id]/runs
+    upset = round(min(pa, wins[b.profile_id]/runs) * (1.1 if abs(rating_diff) < 5 else 0.85), 2)
+    return {"match_type": "league_timed_3x5", "seed": seed, "monte_carlo_runs": runs, "player_a": a.public_dict(), "player_b": b.public_dict(), "player_a_win_probability": wins[a.profile_id]/runs, "player_b_win_probability": wins[b.profile_id]/runs, "draw_probability": wins[None]/runs, "player_a_3_0_sets": a30/runs, "player_a_2_1_sets": a21/runs, "player_b_3_0_sets": b30/runs, "player_b_2_1_sets": b21/runs, "one_drawn_set_probability": one_draw/runs, "two_or_more_drawn_sets_probability": multi_draw/runs, "match_draw_probability": wins[None]/runs, "expected_total_points": round(total_points/runs,1), "expected_total_duration_seconds": round(total_duration/runs,1), "expected_total_rallies": round(total_rallies/runs,1), "expected_points_per_minute": round(ppm/runs,2), "expected_set_scores": [[round(x/runs,1), round(y/runs,1)] for x,y in set_scores], "final_minute_decider_probability": final_decider/runs, "style_edge_summary": f"{a.name} brings {a.play_style}; {b.name} brings {b.play_style}. League timing rewards fast starts, quick finishing, controlled protection of leads and useful volatility more than Tour BO5.", "pace_edge_summary": f"{leader} has the stronger timed-format pace profile ({abs(pace_a-pace_b):.1f} point edge)." if abs(pace_a-pace_b) >= 2.5 else "Pace tools are close enough that clock management may matter more than raw speed.", "pressure_edge_summary": f"Mental ratings are {a.rating('mental_rating'):.1f}-{b.rating('mental_rating'):.1f}; final-minute and must-score rallies receive league-specific pressure weighting.", "league_suitability_summary": f"Timed 3x5 boosts volley pressure, front-court finishing and first-step speed while reducing the BO5 endurance premium.", "match_context": match_context, "context_summary": context_summary(match_context), "rating_edge": round(rating_diff, 2), "style_edge": style_edge(a, b, league=True), "context_edge": ctx_edges["context_edge"], "pressure_edge": ctx_edges["pressure_edge"], "fatigue_edge": ctx_edges["fatigue_edge"], "volatility_index": volatility_index(a, b, league=True), "expected_closeness": round(1 - min(abs(rating_diff) / 24, 1), 2), "upset_probability_estimate": upset, "key_advantages": [f"{leader} has the stronger timed pace profile.", "Clock management may decide close sets."], "risk_factors": ["Drawn sets remain possible in timed format.", "Final-minute rallies can swing set outcomes."], "tactical_preview": tactical_preview(a, b, match_context, league=True), "expected_points_per_minute_range": [round((ppm/runs)*0.88,2), round((ppm/runs)*1.14,2)], "expected_draw_risk": wins[None]/runs, "expected_final_minute_importance": final_decider/runs, "likely_clock_pattern": "Fast exchanges if pace players control the T; longer rallies increase overtime-set risk.", "preview_diagnostics": {"rating_edge": round(rating_diff, 2), "style_edge": style_edge(a, b, league=True), "format_edge": "League Timed 3x5 leans toward quick initiative, front-court invention, pace and closing discipline.", "volatility_estimate": volatility_index(a, b, league=True), "expected_closeness": round(1 - min(abs(rating_diff) / 24, 1), 2)}}
+
+
+def _key_entry_league(rally: dict[str, Any], reason: str, players: dict[int, MatchPlayer]) -> dict[str, Any]:
+    winner_id = rally.get("winner_profile_id")
+    return {
+        "reason": reason,
+        "game_number": rally.get("game_number"),
+        "rally_number": rally.get("rally_number"),
+        "score_before": rally.get("score_before"),
+        "winner": players[winner_id].name if winner_id in players else "Let",
+        "terminal_type": rally.get("terminal_type"),
+        "rally_shots": rally.get("rally_shots"),
+        "rally_duration_seconds": rally.get("rally_duration_seconds"),
+        "explanation": rally.get("explanation", "Clock-pressure exchange."),
+    }
+
+
+def _key_rallies_league(rallies: list[dict[str, Any]], games: list[dict[str, Any]], a: MatchPlayer, b: MatchPlayer) -> list[dict[str, Any]]:
+    players = {a.profile_id: a, b.profile_id: b}
+    scoring = [r for r in rallies if r.get("terminal_type") != "let_replayed"]
+    picked: list[tuple[int, str, dict[str, Any]]] = []
+    seen: set[int] = set()
+    def add(r: dict[str, Any] | None, reason: str, priority: int) -> None:
+        if not r or id(r) in seen: return
+        seen.add(id(r)); picked.append((priority, reason, r))
+    for r in scoring:
+        if r.get("pressure_level") == "must_score": add(r, "must-score rally", 1)
+        elif r.get("pressure_level") == "set_point_equivalent": add(r, "set-point-equivalent rally", 1)
+        elif r.get("clock_phase") == "final_minute": add(r, "final-minute rally", 3)
+        if r.get("seconds_remaining_after", 999) <= 15: add(r, "biggest clock-pressure rally", 2)
+    add(max(scoring, key=lambda r: r.get("rally_shots", 0), default=None), "longest rally", 2)
+    for game in games:
+        game_rallies = [r for r in scoring if r.get("game_number") == game.get("game_number")]
+        if game_rallies:
+            add(game_rallies[-1], "rally that fixed the set winner/draw outcome", 1)
+    return [_key_entry_league(r, reason, players) for _, reason, r in sorted(picked, key=lambda item: (item[0], item[2].get("rally_number", 0)))[:12]][:12]
+
+
+def _explanation_breakdown_league(a: MatchPlayer, b: MatchPlayer, winner_id: int | None, stats: dict[str, Any], games: list[dict[str, Any]], match_context: dict[str, Any] | None) -> dict[str, str]:
+    if winner_id is None:
+        rating_text = "Ratings and timed-set variance left neither player with a decisive set edge."
+        style_text = "The styles cancelled out enough across three short sets to produce a draw."
+        name = "Neither player"
+        wid = str(a.profile_id); lid = str(b.profile_id)
+    else:
+        winner = a if winner_id == a.profile_id else b
+        loser = b if winner_id == a.profile_id else a
+        wid = str(winner.profile_id); lid = str(loser.profile_id); name = winner.name
+        edge = winner.rating("league_rating") - loser.rating("league_rating")
+        rating_text = f"{winner.name} had a {edge:.1f} League rating edge." if edge >= 0 else f"{winner.name} overcame a {abs(edge):.1f} League rating deficit."
+        style_text = f"{winner.name}'s {winner.play_style} profile was useful in fast points and set-closing phases."
+    return {
+        "rating_factor": rating_text,
+        "style_factor": style_text,
+        "context_factor": f"Context was {context_summary(match_context)}; it subtly shifted pace, pressure, crowd and starting fatigue.",
+        "pressure_factor": f"Clock-pressure points were {stats.get('clock_pressure_points_won', {}).get(wid, 0)}-{stats.get('clock_pressure_points_won', {}).get(lid, 0)}.",
+        "fatigue_factor": f"Final fatigue: {stats.get('fatigue_final', {}).get(str(a.profile_id), '—')} for {a.name}, {stats.get('fatigue_final', {}).get(str(b.profile_id), '—')} for {b.name}.",
+        "key_rallies_factor": f"{sum(stats.get('lead_changes_by_set', []))} lead changes and late-set rallies explain the set outcomes.",
+        "randomness_factor": f"{name} benefited from rally-level variance constrained by league ratings, clock context and pressure logic.",
+    }

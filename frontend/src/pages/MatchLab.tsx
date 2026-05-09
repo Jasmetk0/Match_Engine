@@ -7,12 +7,49 @@ import {
   listPlayers,
   MatchGenerateResponse,
   MatchPreviewResponse,
+  MatchContext,
   BatchMatchResponse,
   previewMatch,
   saveMatch,
   SeasonProfile,
 } from '../services/api';
 import { MatchResultView } from '../components/MatchResultView';
+
+
+const DEFAULT_CONTEXT: MatchContext = {
+  event_importance: 'regular',
+  court_type: 'standard_court',
+  crowd_environment: 'neutral',
+  rest_context: 'equal_rest',
+  travel_context: 'none',
+  pressure_context: 'normal',
+};
+
+const LABELS: Record<string, string> = {
+  regular: 'Regular', major: 'Major', world_championship: 'World Championship', final: 'Final', rivalry: 'Rivalry', exhibition: 'Exhibition',
+  standard_court: 'Standard court', glass_court: 'Glass court', fast_court: 'Fast court', slow_court: 'Slow court',
+  neutral: 'Neutral', home_player_a: 'Home player A', home_player_b: 'Home player B', hostile_to_a: 'Hostile to A', hostile_to_b: 'Hostile to B',
+  equal_rest: 'Equal rest', player_a_short_rest: 'Player A short rest', player_b_short_rest: 'Player B short rest', both_tired: 'Both tired',
+  none: 'None', player_a_travel_fatigue: 'Player A travel fatigue', player_b_travel_fatigue: 'Player B travel fatigue',
+  normal: 'Normal', media_hype: 'Media hype', legacy_match: 'Legacy match', comeback_pressure: 'Comeback pressure', must_win: 'Must win',
+};
+
+const SCENARIOS: { label: string; context: MatchContext }[] = [
+  { label: 'Neutral regular match', context: DEFAULT_CONTEXT },
+  { label: 'Major semifinal', context: { ...DEFAULT_CONTEXT, event_importance: 'major', court_type: 'glass_court', pressure_context: 'media_hype' } },
+  { label: 'World Championship final', context: { ...DEFAULT_CONTEXT, event_importance: 'world_championship', court_type: 'glass_court', pressure_context: 'legacy_match' } },
+  { label: 'Heated rivalry', context: { ...DEFAULT_CONTEXT, event_importance: 'rivalry', pressure_context: 'media_hype' } },
+  { label: 'Home crowd advantage A', context: { ...DEFAULT_CONTEXT, event_importance: 'major', crowd_environment: 'home_player_a' } },
+  { label: 'Home crowd advantage B', context: { ...DEFAULT_CONTEXT, event_importance: 'major', crowd_environment: 'home_player_b' } },
+  { label: 'Exhausted back-to-back match', context: { ...DEFAULT_CONTEXT, rest_context: 'both_tired', pressure_context: 'must_win' } },
+  { label: 'Exhibition showcase', context: { ...DEFAULT_CONTEXT, event_importance: 'exhibition', pressure_context: 'normal' } },
+  { label: 'League pressure duel', context: { ...DEFAULT_CONTEXT, event_importance: 'major', pressure_context: 'must_win', court_type: 'glass_court' } },
+];
+
+function contextText(context: MatchContext | undefined) {
+  const ctx = context ?? DEFAULT_CONTEXT;
+  return [ctx.event_importance, ctx.court_type, ctx.crowd_environment, ctx.rest_context, ctx.travel_context, ctx.pressure_context].map((key) => LABELS[key]).join(' · ');
+}
 
 type ProfileOption = SeasonProfile & { playerName: string };
 
@@ -47,6 +84,7 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
   const [seed, setSeed] = useState('squash-lab-1');
   const [runs, setRuns] = useState(500);
   const [matchType, setMatchType] = useState<'tour_bo5' | 'league_timed_3x5'>('tour_bo5');
+  const [matchContext, setMatchContext] = useState<MatchContext>(DEFAULT_CONTEXT);
   const [preview, setPreview] = useState<MatchPreviewResponse | null>(null);
   const [result, setResult] = useState<MatchGenerateResponse | null>(null);
   const [loading, setLoading] = useState<'profiles' | 'preview' | 'generate' | 'save' | 'batch' | null>('profiles');
@@ -98,6 +136,7 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
       seed: (seedOverride ?? seed) || null,
       match_type: matchType,
       monte_carlo_runs: runs,
+      match_context: matchContext,
     };
   }
 
@@ -184,6 +223,7 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
         match_type: payload.match_type,
         seed: payload.seed,
         runs: Math.max(5, Math.min(200, batchRuns)),
+        match_context: matchContext,
       }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not run batch simulation');
@@ -242,6 +282,27 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
             <small>500 is recommended for fast local testing. Higher runs are useful but may feel slow on older PCs.</small>
           </label>
         </div>
+
+        <details className="diagnostics-panel context-control-panel" open>
+          <summary>Match Context</summary>
+          <p className="helper-text">Context changes should be subtle. Player attributes still dominate.</p>
+          <div className="button-row match-actions scenario-row">
+            <span className="seed-pill">Scenario Preset:</span>
+            {SCENARIOS.map((scenario) => (
+              <button className="ghost-button" key={scenario.label} onClick={() => { setMatchContext(scenario.context); clearGeneratedState(); }} type="button">{scenario.label}</button>
+            ))}
+          </div>
+          <div className="form-grid compact-grid">
+            <label className="field-label"><span>Event importance</span><select value={matchContext.event_importance} onChange={(e) => { setMatchContext({ ...matchContext, event_importance: e.target.value as MatchContext['event_importance'] }); clearGeneratedState(); }}><option value="regular">Regular</option><option value="major">Major</option><option value="world_championship">World Championship</option><option value="final">Final</option><option value="rivalry">Rivalry</option><option value="exhibition">Exhibition</option></select></label>
+            <label className="field-label"><span>Court type</span><select value={matchContext.court_type} onChange={(e) => { setMatchContext({ ...matchContext, court_type: e.target.value as MatchContext['court_type'] }); clearGeneratedState(); }}><option value="standard_court">Standard court</option><option value="glass_court">Glass court</option><option value="fast_court">Fast court</option><option value="slow_court">Slow court</option></select></label>
+            <label className="field-label"><span>Crowd environment</span><select value={matchContext.crowd_environment} onChange={(e) => { setMatchContext({ ...matchContext, crowd_environment: e.target.value as MatchContext['crowd_environment'] }); clearGeneratedState(); }}><option value="neutral">Neutral</option><option value="home_player_a">Home player A</option><option value="home_player_b">Home player B</option><option value="hostile_to_a">Hostile to A</option><option value="hostile_to_b">Hostile to B</option></select></label>
+            <label className="field-label"><span>Rest context</span><select value={matchContext.rest_context} onChange={(e) => { setMatchContext({ ...matchContext, rest_context: e.target.value as MatchContext['rest_context'] }); clearGeneratedState(); }}><option value="equal_rest">Equal rest</option><option value="player_a_short_rest">Player A short rest</option><option value="player_b_short_rest">Player B short rest</option><option value="both_tired">Both tired</option></select></label>
+            <label className="field-label"><span>Travel context</span><select value={matchContext.travel_context} onChange={(e) => { setMatchContext({ ...matchContext, travel_context: e.target.value as MatchContext['travel_context'] }); clearGeneratedState(); }}><option value="none">None</option><option value="player_a_travel_fatigue">Player A travel fatigue</option><option value="player_b_travel_fatigue">Player B travel fatigue</option></select></label>
+            <label className="field-label"><span>Pressure context</span><select value={matchContext.pressure_context} onChange={(e) => { setMatchContext({ ...matchContext, pressure_context: e.target.value as MatchContext['pressure_context'] }); clearGeneratedState(); }}><option value="normal">Normal</option><option value="media_hype">Media hype</option><option value="legacy_match">Legacy match</option><option value="comeback_pressure">Comeback pressure</option><option value="must_win">Must win</option></select></label>
+          </div>
+          <div className="match-meta-line"><span>{contextText(matchContext)}</span></div>
+        </details>
+
         <div className="button-row match-actions">
           <button className="primary-button" disabled={loading !== null || profiles.length < 2 || sameProfileSelected} onClick={calculatePreview} type="button">
             {loading === 'preview' ? 'Calculating…' : 'Calculate Probabilities'}
@@ -293,6 +354,8 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
                 <div className="rating-card"><span>Avg clean time</span><strong>{minutes(batchResult.average_clean_time_seconds)}</strong><p>Broadcast {minutes(batchResult.average_broadcast_time_seconds)}</p></div>
               </div>
               <p>{batchResult.style_summary}</p>
+              {batchResult.context_summary && <p>Context: {batchResult.context_summary}</p>}
+              {batchResult.context_shift_summary && <p>{batchResult.context_shift_summary}</p>}
               <p>{batchResult.recommendation_summary}</p>
               <h3>Scoreline distribution</h3>
               <div className="scoreline-grid">{Object.entries(batchResult.scoreline_distribution).map(([label, count]) => <span key={label}>{label}: {count}</span>)}</div>
@@ -312,6 +375,24 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
                 <h2>{preview.player_a.name} vs {preview.player_b.name}</h2>
               </div>
               <span className="seed-pill">Seed {preview.seed}</span>
+            </div>
+            <div className="match-meta-line"><span>Context: {preview.context_summary ?? contextText(preview.match_context)}</span></div>
+            <div className="story-box pre-match-intel">
+              <h3>Pre-match Intelligence</h3>
+              <div className="scoreline-grid">
+                <span>Rating edge: {preview.rating_edge ?? '—'}</span><span>Style edge: {String(preview.style_edge ?? '—')}</span><span>Context edge: {preview.context_edge ?? '—'}</span><span>Pressure edge: {preview.pressure_edge ?? '—'}</span><span>Fatigue edge: {preview.fatigue_edge ?? '—'}</span><span>Volatility: {preview.volatility_index ?? '—'}</span><span>Closeness: {preview.expected_closeness ?? '—'}</span><span>Upset estimate: {pct(preview.upset_probability_estimate)}</span>
+                {preview.expected_long_rally_share !== undefined && <span>Long-rally share: {pct(preview.expected_long_rally_share)}</span>}
+                {preview.expected_pressure_point_share !== undefined && <span>Pressure-point share: {pct(preview.expected_pressure_point_share)}</span>}
+                {preview.expected_clean_time_range && <span>Clean time range: {minutes(preview.expected_clean_time_range[0])}–{minutes(preview.expected_clean_time_range[1])}</span>}
+                {preview.expected_broadcast_time_range && <span>Broadcast range: {minutes(preview.expected_broadcast_time_range[0])}–{minutes(preview.expected_broadcast_time_range[1])}</span>}
+                {preview.expected_points_per_minute_range && <span>Points/min range: {preview.expected_points_per_minute_range[0]}–{preview.expected_points_per_minute_range[1]}</span>}
+                {preview.expected_draw_risk !== undefined && <span>Draw risk: {pct(preview.expected_draw_risk)}</span>}
+                {preview.expected_final_minute_importance !== undefined && <span>Final-minute importance: {pct(preview.expected_final_minute_importance)}</span>}
+              </div>
+              {preview.tactical_preview && <p>{preview.tactical_preview}</p>}
+              {preview.likely_clock_pattern && <p>{preview.likely_clock_pattern}</p>}
+              {preview.key_advantages?.length ? <p><strong>Key advantages:</strong> {preview.key_advantages.join(' · ')}</p> : null}
+              {preview.risk_factors?.length ? <p><strong>Risk factors:</strong> {preview.risk_factors.join(' · ')}</p> : null}
             </div>
             {preview.match_type === 'league_timed_3x5' ? (
               <>
