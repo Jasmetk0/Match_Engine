@@ -46,8 +46,8 @@ export function App() {
         <div className="brand-block">
           <div className="brand-mark">SML</div>
           <div>
-            <span>Squash</span>
-            <strong>Match Lab</strong>
+            <span>Elite Match Engine</span>
+            <strong>Squash Match Lab</strong>
           </div>
         </div>
 

@@ -21,6 +21,9 @@ import {
   updatePlayer,
   updateProfile,
 } from '../services/api';
+import { AttributeBars } from '../components/AttributeBars';
+import { PlayerAvatar } from '../components/PlayerAvatar';
+import { RatingRadar } from '../components/RatingRadar';
 import {
   AttributeKey,
   QualityPreset,
@@ -147,6 +150,140 @@ function Select({ label, name, defaultValue, children }: { label: string; name: 
   );
 }
 
+
+
+const categoryKeys = [
+  ['Technical', 'technical_rating'],
+  ['Physical', 'physical_rating'],
+  ['Tactical', 'tactical_rating'],
+  ['Mental', 'mental_rating'],
+  ['Attacking', 'attacking_rating'],
+  ['Defensive', 'defensive_rating'],
+] as const;
+
+const attributeLabels: { key: AttributeKey; label: string }[] = [
+  { key: 'serve_pressure', label: 'Serve pressure' },
+  { key: 'return_initiative', label: 'Return initiative' },
+  { key: 'length_quality', label: 'Length quality' },
+  { key: 'width_control', label: 'Width control' },
+  { key: 'volley_takeover', label: 'Volley takeover' },
+  { key: 'front_court_touch', label: 'Front-court touch' },
+  { key: 'finishing_power', label: 'Finishing power' },
+  { key: 'first_step_cod', label: 'First-step/COD' },
+  { key: 't_recovery', label: 'T recovery' },
+  { key: 'aerobic_repeatability', label: 'Aerobic repeatability' },
+  { key: 'recovery_efficiency', label: 'Recovery efficiency' },
+  { key: 'anticipation', label: 'Anticipation' },
+  { key: 'shot_selection', label: 'Shot selection' },
+  { key: 'adaptability', label: 'Adaptability' },
+  { key: 'composure', label: 'Composure' },
+  { key: 'error_discipline', label: 'Error discipline' },
+  { key: 'deception_creativity', label: 'Deception creativity' },
+  { key: 'durability', label: 'Durability' },
+];
+
+function latestProfile(profiles: SeasonProfile[]) {
+  return [...profiles].sort((left, right) => right.season_year - left.season_year)[0] ?? null;
+}
+
+function topAttributes(profile: SeasonProfile) {
+  return attributeLabels
+    .map((entry) => ({ ...entry, value: profile.attributes[entry.key] ?? 0 }))
+    .sort((left, right) => right.value - left.value)
+    .slice(0, 3);
+}
+
+function MiniMeter({ label, value, tone = 'emerald' }: { label: string; value: number; tone?: 'emerald' | 'gold' | 'red' | 'blue' }) {
+  return (
+    <div className={`mini-meter tone-${tone}`}>
+      <div><span>{label}</span><strong>{Math.round(value)}</strong></div>
+      <div className="mini-meter-track"><span style={{ width: `${Math.max(0, Math.min(100, value))}%` }} /></div>
+    </div>
+  );
+}
+
+function PlayerProfileOverview({ player, analytics }: { player: PlayerWithProfiles; analytics: PlayerAnalytics | null }) {
+  const defaultProfile = latestProfile(player.profiles);
+  const [profileId, setProfileId] = useState<number | ''>(defaultProfile?.id ?? '');
+
+  useEffect(() => {
+    setProfileId(latestProfile(player.profiles)?.id ?? '');
+  }, [player.id, player.profiles]);
+
+  const profile = player.profiles.find((item) => item.id === profileId) ?? defaultProfile;
+
+  if (!profile) {
+    return (
+      <div className="player-profile-card player-profile-card--empty">
+        <PlayerAvatar name={player.name} subtitle={player.nationality} handedness={player.handedness} size="lg" />
+        <div><p className="eyebrow">Player profile</p><h2>No season profile yet</h2><p>Add a season profile below to unlock ratings, radar and scouting diagnostics.</p></div>
+      </div>
+    );
+  }
+
+  const radarValues = categoryKeys.map(([label, key]) => ({ label: label === 'Attacking' ? 'Attack' : label === 'Defensive' ? 'Defense' : label, value: profile[key] }));
+  const recent = analytics?.recent_matches?.slice(0, 8) ?? [];
+
+  return (
+    <div className="player-profile-card">
+      <div className="profile-hero-panel">
+        <div className="profile-identity-block">
+          <PlayerAvatar name={player.name} subtitle={player.nationality} handedness={player.handedness} playStyle={profile.play_style} size="lg" />
+          <div className="profile-title-copy">
+            <p className="eyebrow">Elite player profile</p>
+            <h2>{player.name}</h2>
+            <p>{player.nickname ? `“${player.nickname}” · ` : ''}{profile.play_style} · {profile.match_mentality}</p>
+            <div className="profile-pill-row">
+              <span className="seed-pill">{profile.season_year} season</span>
+              <span className="seed-pill">{profile.injury_status}</span>
+              <span className="seed-pill">{profile.progression_type}</span>
+            </div>
+          </div>
+        </div>
+        {player.profiles.length > 1 && (
+          <label className="field-label profile-season-select"><span>Profile season</span><select value={profile.id} onChange={(event) => setProfileId(Number(event.target.value))}>{[...player.profiles].sort((a, b) => b.season_year - a.season_year).map((item) => <option key={item.id} value={item.id}>{item.season_year}</option>)}</select></label>
+        )}
+      </div>
+
+      <div className="profile-main-grid">
+        <div className="profile-rating-column">
+          <div className="rating-duo">
+            <div className="rating-card featured"><span>Tour rating</span><strong>{profile.tournament_rating.toFixed(1)}</strong><p>BO5 match strength</p></div>
+            <div className="rating-card featured gold"><span>League rating</span><strong>{profile.league_rating.toFixed(1)}</strong><p>Timed 3x5 strength</p></div>
+          </div>
+          <div className="ratings-grid profile-categories">
+            {categoryKeys.map(([label, key]) => <div className="rating-card" key={key}><span>{label}</span><strong>{profile[key].toFixed(1)}</strong></div>)}
+          </div>
+          <div className="diagnostic-card">
+            <h3>Scouting notes</h3>
+            <p><strong>Personality:</strong> {profile.career_personality}</p>
+            <p><strong>Top strengths:</strong> {topAttributes(profile).map((entry) => `${entry.label} ${Math.round(entry.value)}`).join(' · ')}</p>
+            {(player.notes || profile.notes) && <p>{profile.notes || player.notes}</p>}
+          </div>
+        </div>
+
+        <div className="radar-panel"><RatingRadar values={radarValues} /></div>
+
+        <div className="form-panel">
+          <h3>Form & availability</h3>
+          <MiniMeter label="Form" value={profile.form} />
+          <MiniMeter label="Confidence" value={profile.confidence} tone="gold" />
+          <MiniMeter label="Fatigue" value={profile.fatigue} tone="red" />
+          <div className="form-strip">
+            <span>Recent saved form</span>
+            <div>{recent.length > 0 ? recent.map((match) => <b className={match.is_draw ? 'draw' : match.winner_name === player.name ? 'win' : 'loss'} key={match.id}>{match.is_draw ? 'D' : match.winner_name === player.name ? 'W' : 'L'}</b>) : <em>No saved matches</em>}</div>
+          </div>
+          {analytics && analytics.total_matches > 0 && <p className="form-summary">Saved record {analytics.wins}-{analytics.losses}-{analytics.draws} · {pct(analytics.win_rate)} win rate</p>}
+        </div>
+      </div>
+
+      <div className="profile-attributes-panel">
+        <div className="section-heading"><div><p className="eyebrow">Attribute map</p><h3>Detailed player toolkit</h3></div></div>
+        <AttributeBars attributes={profile.attributes} />
+      </div>
+    </div>
+  );
+}
 
 function pct(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
@@ -573,6 +710,7 @@ export function Players() {
 
           {selected && (
             <>
+              <PlayerProfileOverview player={selected} analytics={analytics} />
               <PlayerForm player={selected} onDelete={() => safe(async () => { if (confirm(`Delete ${selected.name}?`)) { await deletePlayer(selected.id); setSelected(null); await refresh(undefined); } })} onSave={(payload) => safe(async () => { await updatePlayer(selected.id, payload); await refresh(selected.id); })} />
               <div className="section-heading"><h2>Season profiles</h2><button className="ghost-button" onClick={() => setNewSeason(newProfile())} type="button">Add season profile</button></div>
               {newSeason && <ProfileEditor player={selected} profile={newSeason} onSave={(payload) => safe(async () => { await createProfile(selected.id, payload); setNewSeason(null); await refresh(selected.id); })} />}
