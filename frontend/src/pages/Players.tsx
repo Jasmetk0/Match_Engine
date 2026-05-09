@@ -21,20 +21,25 @@ import {
   updatePlayer,
   updateProfile,
 } from '../services/api';
+import {
+  AttributeKey,
+  QualityPreset,
+  attributeDescriptions,
+  compareProfiles,
+  generateAttributesFromPreset,
+  normalizeAttributesToTarget,
+  qualityPresets,
+  randomFictionalName,
+  randomPlayStyle,
+} from '../utils/playerPresets';
 
-const attributeGroups: { title: string; fields: (keyof PlayerAttributes)[] }[] = [
-  {
-    title: 'Technical Control',
-    fields: ['serve_pressure', 'return_initiative', 'length_quality', 'width_control', 'volley_takeover', 'front_court_touch'],
-  },
-  {
-    title: 'Athletic Engine',
-    fields: ['finishing_power', 'first_step_cod', 't_recovery', 'aerobic_repeatability', 'recovery_efficiency', 'durability'],
-  },
-  {
-    title: 'Squash IQ / Mental',
-    fields: ['anticipation', 'shot_selection', 'adaptability', 'composure', 'error_discipline', 'deception_creativity'],
-  },
+const attributeGroups: { title: string; fields: AttributeKey[] }[] = [
+  { title: 'Serve/Return', fields: ['serve_pressure', 'return_initiative'] },
+  { title: 'Court Control', fields: ['length_quality', 'width_control', 'volley_takeover'] },
+  { title: 'Attack', fields: ['front_court_touch', 'finishing_power', 'deception_creativity'] },
+  { title: 'Movement', fields: ['first_step_cod', 't_recovery', 'anticipation'] },
+  { title: 'Endurance/Recovery', fields: ['aerobic_repeatability', 'recovery_efficiency', 'durability'] },
+  { title: 'Tactical/Mental', fields: ['shot_selection', 'adaptability', 'composure', 'error_discipline'] },
 ];
 
 
@@ -97,7 +102,7 @@ const newProfile = (): SeasonProfilePayload => ({
   injury_status: 'Fresh',
   skill_environment: 1,
   notes: '',
-  attributes: defaultAttributes,
+  attributes: { ...defaultAttributes },
 });
 
 const emptyPlayer: PlayerPayload = {
@@ -220,32 +225,64 @@ function PlayerForm({ player, onSave, onDelete }: { player: PlayerPayload; onSav
   );
 }
 
-function ProfileEditor({ profile, onSave, onDelete, onDuplicate }: { profile: SeasonProfile | SeasonProfilePayload; onSave: (payload: SeasonProfilePayload) => Promise<void>; onDelete?: () => Promise<void>; onDuplicate?: (seasonYear: number) => Promise<void> }) {
+function readProfilePayload(form: FormData, attributes: PlayerAttributes): SeasonProfilePayload {
+  return {
+    season_year: Number(form.get('season_year')),
+    age: numberOrNull(form.get('age')),
+    play_style: String(form.get('play_style') || 'All-Rounder'),
+    career_personality: String(form.get('career_personality') || 'Stable Grinder'),
+    match_mentality: String(form.get('match_mentality') || 'Mentally Tough'),
+    progression_type: String(form.get('progression_type') || 'Standard'),
+    form: rating(form.get('form')),
+    confidence: rating(form.get('confidence')),
+    fatigue: rating(form.get('fatigue'), 0),
+    injury_status: form.get('injury_status') as 'Fresh' | 'Managed' | 'Worn' | 'Compromised',
+    skill_environment: Number(form.get('skill_environment') || 1),
+    notes: String(form.get('notes') ?? ''),
+    attributes,
+  };
+}
+
+function ProfileEditor({ profile, player, onSave, onDelete, onDuplicate, onClone }: { profile: SeasonProfile | SeasonProfilePayload; player?: PlayerWithProfiles; onSave: (payload: SeasonProfilePayload) => Promise<void>; onDelete?: () => Promise<void>; onDuplicate?: (seasonYear: number) => Promise<void>; onClone?: (profile: SeasonProfile, name: string, nationality: string) => Promise<void> }) {
   const [duplicateYear, setDuplicateYear] = useState((profile.season_year ?? new Date().getFullYear()) + 1);
-  const attributes = { ...defaultAttributes, ...(profile.attributes ?? {}) };
+  const [attributes, setAttributes] = useState<PlayerAttributes>({ ...defaultAttributes, ...(profile.attributes ?? {}) });
   const savedProfile = 'id' in profile ? profile : null;
+
+  useEffect(() => {
+    setAttributes({ ...defaultAttributes, ...(profile.attributes ?? {}) });
+    setDuplicateYear((profile.season_year ?? new Date().getFullYear()) + 1);
+  }, [profile]);
+
+  function setAttribute(field: AttributeKey, value: string) {
+    setAttributes((current) => ({ ...current, [field]: rating(value) }));
+  }
+
+  function applyPreset(event: FormEvent<HTMLButtonElement>) {
+    const form = event.currentTarget.form;
+    if (!form) return;
+    const formData = new FormData(form);
+    const preset = String(formData.get('quality_preset') || 'Elite Tour') as QualityPreset;
+    if (!confirm(`Replace all attributes on this profile with the ${preset} preset?`)) return;
+    setAttributes(generateAttributesFromPreset({
+      qualityPreset: preset,
+      playStyle: String(formData.get('play_style') || profile.play_style || 'All-Rounder'),
+      handedness: player?.handedness,
+      name: player?.name ?? 'Custom Player',
+      seasonYear: Number(formData.get('season_year') || profile.season_year || 2030),
+    }));
+  }
+
+  function normalize(event: FormEvent<HTMLButtonElement>) {
+    const form = event.currentTarget.form;
+    if (!form) return;
+    const target = Number(new FormData(form).get('rating_target') || 80);
+    if (!confirm(`Scale all attributes toward an approximate rating target of ${target}?`)) return;
+    setAttributes((current) => normalizeAttributesToTarget(current, target));
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const nextAttributes = Object.fromEntries(
-      Object.keys(defaultAttributes).map((key) => [key, rating(form.get(key))]),
-    ) as unknown as PlayerAttributes;
-    await onSave({
-      season_year: Number(form.get('season_year')),
-      age: numberOrNull(form.get('age')),
-      play_style: String(form.get('play_style') || 'All-Rounder'),
-      career_personality: String(form.get('career_personality') || 'Stable Grinder'),
-      match_mentality: String(form.get('match_mentality') || 'Mentally Tough'),
-      progression_type: String(form.get('progression_type') || 'Standard'),
-      form: rating(form.get('form')),
-      confidence: rating(form.get('confidence')),
-      fatigue: rating(form.get('fatigue'), 0),
-      injury_status: form.get('injury_status') as 'Fresh' | 'Managed' | 'Worn' | 'Compromised',
-      skill_environment: Number(form.get('skill_environment') || 1),
-      notes: String(form.get('notes') ?? ''),
-      attributes: nextAttributes,
-    });
+    await onSave(readProfilePayload(new FormData(event.currentTarget), attributes));
   }
 
   return (
@@ -284,24 +321,147 @@ function ProfileEditor({ profile, onSave, onDelete, onDuplicate }: { profile: Se
       </div>
       <label className="field-label wide-field"><span>Profile notes</span><textarea defaultValue={profile.notes ?? ''} name="notes" /></label>
 
+      <div className="helper-panel">
+        <div className="form-grid compact-grid">
+          <Select defaultValue="Elite Tour" label="Apply preset to this profile" name="quality_preset">{options(qualityPresets)}</Select>
+          <Input defaultValue={savedProfile?.tournament_rating ?? 85} label="Normalize to rating target" max={100} min={0} name="rating_target" type="number" />
+        </div>
+        <div className="button-row">
+          <button className="ghost-button" onClick={applyPreset} type="button">Apply preset attributes</button>
+          <button className="ghost-button" onClick={normalize} type="button">Normalize attributes</button>
+        </div>
+      </div>
+
       {attributeGroups.map((group) => (
         <div className="attribute-group" key={group.title}>
           <h3>{group.title}</h3>
           <div className="form-grid compact-grid">
-            {group.fields.map((field) => <Input defaultValue={attributes[field]} key={field} label={field.replace(/_/g, ' ')} max={100} min={0} name={field} type="number" />)}
+            {group.fields.map((field) => (
+              <label className="field-label attribute-field" key={field}>
+                <span>{field.replace(/_/g, ' ')}</span>
+                <small>{attributeDescriptions[field]}</small>
+                <input max={100} min={0} name={field} onChange={(event) => setAttribute(field, event.target.value)} type="number" value={attributes[field]} />
+              </label>
+            ))}
           </div>
         </div>
       ))}
 
-      {onDuplicate && (
+      {(onDuplicate || (savedProfile && onClone)) && (
         <div className="duplicate-row">
-          <label className="field-label"><span>Duplicate to season</span><input max={2200} min={1900} onChange={(event) => setDuplicateYear(Number(event.target.value))} type="number" value={duplicateYear} /></label>
-          <button className="ghost-button" onClick={() => onDuplicate(duplicateYear)} type="button">Duplicate profile</button>
+          {onDuplicate && <><label className="field-label"><span>Duplicate to season</span><input max={2200} min={1900} onChange={(event) => setDuplicateYear(Number(event.target.value))} type="number" value={duplicateYear} /></label><button className="ghost-button" onClick={() => onDuplicate(duplicateYear)} type="button">Duplicate profile</button></>}
+          {savedProfile && onClone && <button className="ghost-button" onClick={() => { const name = prompt('New player name', `${player?.name ?? 'Player'} Copy`); if (!name) return; const nationality = prompt('New nationality', player?.nationality ?? 'Unknown') || 'Unknown'; onClone(savedProfile, name, nationality); }} type="button">Clone as new player</button>}
         </div>
       )}
     </form>
   );
 }
+
+function QuickCreatePanel({ onCreate }: { onCreate: (player: PlayerPayload, profile: SeasonProfilePayload) => Promise<void> }) {
+  const [randomizeStyle, setRandomizeStyle] = useState(false);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const seasonYear = Number(form.get('season_year') || 2030);
+    const qualityPreset = String(form.get('quality_preset') || 'Elite Tour') as QualityPreset;
+    const nationality = String(form.get('nationality') || 'Unknown');
+    const handedness = form.get('handedness') as 'right' | 'left';
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const randomMode = submitter?.value === 'random';
+    const playStyle = randomMode && randomizeStyle ? randomPlayStyle(`${nationality}|${seasonYear}|${qualityPreset}`, playStyles) : String(form.get('play_style') || 'All-Rounder');
+    const rawName = String(form.get('name') || '').trim();
+    if (!randomMode && !rawName) {
+      alert('Enter a name for Quick Create Player, or use Generate Random Player.');
+      return;
+    }
+    const name = rawName || randomFictionalName(`${nationality}|${seasonYear}|${qualityPreset}|${playStyle}`);
+    const notes = String(form.get('notes') ?? '');
+
+    await onCreate(
+      {
+        ...emptyPlayer,
+        name,
+        nationality,
+        handedness,
+        notes: notes || (randomMode ? `Generated random ${qualityPreset} ${playStyle}.` : ''),
+      },
+      {
+        ...newProfile(),
+        season_year: seasonYear,
+        play_style: playStyle,
+        match_mentality: String(form.get('match_mentality') || 'Mentally Tough'),
+        career_personality: String(form.get('career_personality') || 'Stable Grinder'),
+        progression_type: String(form.get('progression_type') || 'Standard'),
+        notes,
+        attributes: generateAttributesFromPreset({ qualityPreset, playStyle, handedness, name, seasonYear }),
+      },
+    );
+    event.currentTarget.reset();
+    setRandomizeStyle(false);
+  }
+
+  return (
+    <form className="editor-card quick-create-card" onSubmit={submit}>
+      <div className="section-heading">
+        <div><p className="eyebrow">Fast setup</p><h2>Quick Create Player</h2><p>Create an identity, one season profile, and a full generated 18-attribute set in one step.</p></div>
+      </div>
+      <div className="form-grid">
+        <Input label="Name (optional for random)" name="name" />
+        <Input defaultValue="Unknown" label="Nationality" name="nationality" />
+        <Input defaultValue={2030} label="Season year" max={2200} min={1900} name="season_year" type="number" />
+        <Select defaultValue="All-Rounder" label="Play style" name="play_style">{options(playStyles)}</Select>
+        <Select defaultValue="Mentally Tough" label="Match mentality" name="match_mentality">{options(matchMentalities)}</Select>
+        <Select defaultValue="Stable Grinder" label="Career personality" name="career_personality">{options(careerPersonalities)}</Select>
+        <Select defaultValue="Standard" label="Progression type" name="progression_type">{options(progressionTypes)}</Select>
+        <Select defaultValue="Elite Tour" label="Quality preset" name="quality_preset">{options(qualityPresets)}</Select>
+        <Select defaultValue="right" label="Handedness" name="handedness"><option value="right">Right-handed</option><option value="left">Left-handed</option></Select>
+      </div>
+      <label className="field-label wide-field"><span>Optional notes</span><textarea name="notes" /></label>
+      <label className="inline-check"><input checked={randomizeStyle} onChange={(event) => setRandomizeStyle(event.target.checked)} type="checkbox" /> Randomize play style when using Generate Random Player</label>
+      <div className="button-row">
+        <button className="primary-button" type="submit" value="quick">Quick create player</button>
+        <button className="ghost-button" type="submit" value="random">Generate Random Player</button>
+      </div>
+    </form>
+  );
+}
+
+function ComparePlayersPanel({ profiles }: { profiles: { player: PlayerWithProfiles; profile: SeasonProfile }[] }) {
+  const [profileAId, setProfileAId] = useState<number | ''>('');
+  const [profileBId, setProfileBId] = useState<number | ''>('');
+  const profileA = profiles.find((item) => item.profile.id === profileAId)?.profile;
+  const profileB = profiles.find((item) => item.profile.id === profileBId)?.profile;
+  const comparison = profileA && profileB ? compareProfiles(profileA, profileB) : null;
+
+  return (
+    <div className="editor-card compare-card">
+      <div className="section-heading"><div><p className="eyebrow">Matchup helper</p><h2>Compare Two Players</h2><p>Pick two season profiles to find useful single-match simulation pairings.</p></div></div>
+      <div className="form-grid">
+        <Select defaultValue="" label="Profile A" name="compare_a"><option value="">Choose profile A</option>{profiles.map(({ player, profile }) => <option key={profile.id} value={profile.id}>{player.name} · {profile.season_year}</option>)}</Select>
+        <Select defaultValue="" label="Profile B" name="compare_b"><option value="">Choose profile B</option>{profiles.map(({ player, profile }) => <option key={profile.id} value={profile.id}>{player.name} · {profile.season_year}</option>)}</Select>
+      </div>
+      <div className="button-row">
+        <button className="ghost-button" onClick={(event) => { const form = event.currentTarget.closest('.compare-card'); const selects = form?.querySelectorAll('select'); setProfileAId(Number(selects?.[0]?.value) || ''); setProfileBId(Number(selects?.[1]?.value) || ''); }} type="button">Compare profiles</button>
+      </div>
+      {comparison && profileA && profileB && (
+        <div className="comparison-output">
+          <div className="scoreline-grid">
+            <span>Tour diff: {comparison.tourDiff > 0 ? '+' : ''}{comparison.tourDiff} for A</span>
+            <span>League diff: {comparison.leagueDiff > 0 ? '+' : ''}{comparison.leagueDiff} for A</span>
+            {Object.entries(comparison.bucketDiffs).map(([bucket, diff]) => <span key={bucket}>{bucket}: {diff > 0 ? '+' : ''}{diff} A</span>)}
+          </div>
+          <p>{comparison.styleNote}</p>
+          <p><strong>Recommended format:</strong> {comparison.recommendedFormat}</p>
+          <div className="comparison-columns">
+            <div><h3>{profileA.play_style} A advantages</h3><ul>{comparison.aAdvantages.map(({ key, diff }) => <li key={key}>{key.replace(/_/g, ' ')} +{diff}</li>)}</ul></div>
+            <div><h3>{profileB.play_style} B advantages</h3><ul>{comparison.bAdvantages.map(({ key, diff }) => <li key={key}>{key.replace(/_/g, ' ')} +{Math.abs(diff)}</li>)}</ul></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 export function Players() {
   const [players, setPlayers] = useState<Player[]>([]);
@@ -312,10 +472,13 @@ export function Players() {
   const [newSeason, setNewSeason] = useState<SeasonProfilePayload | null>(null);
   const [analytics, setAnalytics] = useState<PlayerAnalytics | null>(null);
   const [analyticsWarning, setAnalyticsWarning] = useState<string | null>(null);
+  const [detailedRoster, setDetailedRoster] = useState<PlayerWithProfiles[]>([]);
 
   async function refresh(selectedId = selected?.id) {
     const roster = await listPlayers();
     setPlayers(roster);
+    const detailed = await Promise.all(roster.map((player) => getPlayer(player.id)));
+    setDetailedRoster(detailed);
     if (selectedId) setSelected(await getPlayer(selectedId));
   }
 
@@ -337,9 +500,45 @@ export function Players() {
   }, [selected?.name]);
 
   const filtered = useMemo(() => players.filter((player) => `${player.name} ${player.nationality}`.toLowerCase().includes(filter.toLowerCase())), [players, filter]);
+  const compareOptions = useMemo(() => detailedRoster.flatMap((player) => player.profiles.map((profile) => ({ player, profile }))), [detailedRoster]);
 
   async function safe(action: () => Promise<void>) {
     try { setError(null); await action(); } catch (err) { setError(err instanceof Error ? err.message : 'Unknown error'); }
+  }
+
+  async function quickCreate(playerPayload: PlayerPayload, profilePayload: SeasonProfilePayload) {
+    const created = await createPlayer(playerPayload);
+    await createProfile(created.id, profilePayload);
+    setAdding(false);
+    await refresh(created.id);
+  }
+
+  async function cloneProfile(profile: SeasonProfile, name: string, nationality: string) {
+    if (!selected) return;
+    const created = await createPlayer({
+      ...emptyPlayer,
+      name,
+      nationality,
+      handedness: selected.handedness,
+      backhand_type: selected.backhand_type ?? '',
+      notes: `Copy of ${selected.name}. ${selected.notes ?? ''}`.trim(),
+    });
+    await createProfile(created.id, {
+      season_year: profile.season_year,
+      age: profile.age,
+      play_style: profile.play_style,
+      career_personality: profile.career_personality,
+      match_mentality: profile.match_mentality,
+      progression_type: profile.progression_type,
+      form: profile.form,
+      confidence: profile.confidence,
+      fatigue: profile.fatigue,
+      injury_status: profile.injury_status,
+      skill_environment: profile.skill_environment,
+      notes: `Copy of ${selected.name} ${profile.season_year} profile. ${profile.notes ?? ''}`.trim(),
+      attributes: { ...profile.attributes },
+    });
+    await refresh(created.id);
   }
 
   return (
@@ -358,6 +557,7 @@ export function Players() {
       <div className="players-layout">
         <aside className="roster-card">
           <input className="search-input" onChange={(event) => setFilter(event.target.value)} placeholder="Search name or nationality" value={filter} />
+          <ComparePlayersPanel profiles={compareOptions} />
           <div className="player-table">
             {filtered.map((player) => (
               <button className={selected?.id === player.id ? 'player-row active' : 'player-row'} key={player.id} onClick={() => safe(async () => { setAdding(false); setNewSeason(null); setSelected(await getPlayer(player.id)); })} type="button">
@@ -368,17 +568,20 @@ export function Players() {
         </aside>
 
         <div className="detail-stack">
+          <QuickCreatePanel onCreate={(playerPayload, profilePayload) => safe(async () => quickCreate(playerPayload, profilePayload))} />
           {adding && <PlayerForm player={emptyPlayer} onSave={(payload) => safe(async () => { const created = await createPlayer(payload); setAdding(false); await refresh(created.id); })} />}
 
           {selected && (
             <>
               <PlayerForm player={selected} onDelete={() => safe(async () => { if (confirm(`Delete ${selected.name}?`)) { await deletePlayer(selected.id); setSelected(null); await refresh(undefined); } })} onSave={(payload) => safe(async () => { await updatePlayer(selected.id, payload); await refresh(selected.id); })} />
               <div className="section-heading"><h2>Season profiles</h2><button className="ghost-button" onClick={() => setNewSeason(newProfile())} type="button">Add season profile</button></div>
-              {newSeason && <ProfileEditor profile={newSeason} onSave={(payload) => safe(async () => { await createProfile(selected.id, payload); setNewSeason(null); await refresh(selected.id); })} />}
+              {newSeason && <ProfileEditor player={selected} profile={newSeason} onSave={(payload) => safe(async () => { await createProfile(selected.id, payload); setNewSeason(null); await refresh(selected.id); })} />}
               {selected.profiles.map((profile) => (
                 <ProfileEditor
                   key={profile.id}
                   profile={profile}
+                  player={selected}
+                  onClone={(profileToClone, name, nationality) => safe(async () => cloneProfile(profileToClone, name, nationality))}
                   onDelete={() => safe(async () => { if (confirm(`Delete ${profile.season_year} profile?`)) { await deleteProfile(profile.id); await refresh(selected.id); } })}
                   onDuplicate={(seasonYear) => safe(async () => { await duplicateProfile(profile.id, { season_year: seasonYear, apply_skill_inflation: true }); await refresh(selected.id); })}
                   onSave={(payload) => safe(async () => { await updateProfile(profile.id, payload); await refresh(selected.id); })}

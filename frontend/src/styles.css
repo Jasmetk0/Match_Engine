@@ -731,3 +731,67 @@ pre.dev-result {
   border-radius: 0.85rem;
   padding: 0.85rem;
 }
+
+.quick-create-card,
+.compare-card,
+.helper-panel {
+  border: 1px solid rgba(77, 255, 190, 0.18);
+  background: linear-gradient(135deg, rgba(77, 255, 190, 0.06), rgba(56, 189, 248, 0.04));
+}
+
+.helper-panel {
+  border-radius: 1rem;
+  margin: 1rem 0;
+  padding: 1rem;
+}
+
+.attribute-field small {
+  color: #93a4b4;
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.35;
+  min-height: 2.1rem;
+}
+
+.inline-check {
+  align-items: center;
+  color: #cbd5e1;
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.compare-card {
+  margin-bottom: 1rem;
+}
+
+.comparison-output {
+  color: #cbd5e1;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin-top: 1rem;
+}
+
+.comparison-columns {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.comparison-columns h3 {
+  color: #f4fbff;
+  font-size: 0.9rem;
+  margin-bottom: 0.35rem;
+}
+
+.comparison-columns ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+@media (max-width: 800px) {
+  .comparison-columns {
+    grid-template-columns: 1fr;
+  }
+}
