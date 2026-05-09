@@ -123,7 +123,7 @@ export function Analytics() {
                 <div className="rating-card"><span>Avg perf</span><strong>{playerStats.average_performance_rating ?? '—'}</strong><p>Best {playerStats.best_performance_rating ?? '—'}</p></div>
               </div>
               <h3>Common opponents</h3>
-              <table className="compact-table"><tbody>{playerStats.common_opponents.map((opp) => <tr key={opp.opponent_name}><td>{opp.opponent_name}</td><td>{opp.matches}</td><td>{opp.wins}-{opp.losses}-{opp.draws}</td></tr>)}</tbody></table>
+              <div className="scroll-x"><table className="compact-table"><tbody>{playerStats.common_opponents.map((opp) => <tr key={opp.opponent_name}><td>{opp.opponent_name}</td><td>{opp.matches}</td><td>{opp.wins}-{opp.losses}-{opp.draws}</td></tr>)}</tbody></table></div>
               <h3>Recent matches</h3>
               <ul className="compact-list">{playerStats.recent_matches.map((match) => <li key={match.id}>{matchLine(match)}</li>)}</ul>
             </>
@@ -159,10 +159,10 @@ export function Analytics() {
       <div className="editor-card leaderboard-card">
         <div className="section-heading"><div><p className="eyebrow">Saved Match Leaderboard</p><h2>Players from saved matches</h2></div><button className="ghost-button" onClick={loadLeaderboard} type="button">Refresh</button></div>
         {leaderboard.length === 0 ? <div className="empty-state"><p>No saved matches yet. Generate and save matches to populate this board.</p></div> : (
-          <table className="compact-table leaderboard-table">
+          <div className="scroll-x"><table className="compact-table leaderboard-table">
             <thead><tr><th>Player</th><th>Matches</th><th>W</th><th>L</th><th>D</th><th>Win rate</th><th>Tour W</th><th>League W</th><th>Point diff</th><th>Avg perf</th></tr></thead>
             <tbody>{leaderboard.map((row) => <tr key={row.player_name}><td>{row.player_name}</td><td>{row.matches}</td><td>{row.wins}</td><td>{row.losses}</td><td>{row.draws}</td><td>{pct(row.win_rate)}</td><td>{row.tour_wins}</td><td>{row.league_wins}</td><td>{row.point_differential}</td><td>{row.average_performance_rating ?? '—'}</td></tr>)}</tbody>
-          </table>
+          </table></div>
         )}
       </div>
     </section>

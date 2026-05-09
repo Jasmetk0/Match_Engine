@@ -663,8 +663,9 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
         <div className="error-banner">Choose two different season profiles before running a preview, match, or batch simulation.</div>
       )}
 
-      <div className="editor-card match-control-card">
-        <div className="form-grid">
+      <div className="editor-card match-control-card workflow-card">
+        <div className="workflow-step-heading"><span>1</span><div><p className="eyebrow">Select Match</p><h2>Choose profiles</h2></div></div>
+        <div className="form-grid match-select-grid">
           <label className="field-label">
             <span>Match type</span>
             <select value={matchType} onChange={(event) => { setMatchType(event.target.value as 'tour_bo5' | 'league_timed_3x5'); clearGeneratedState(); }}>
@@ -718,7 +719,9 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
           <button className="ghost-button" disabled={loading !== null || !playerAProfileId || !playerBProfileId} onClick={swapPlayers} type="button">Swap A/B</button>
         </div>
 
-        <div className="editor-card quick-create-card">
+        <div className="workflow-step-heading"><span>2</span><div><p className="eyebrow">Match Setup</p><h2>Seed, runs and context</h2></div></div>
+
+        <div className="editor-card quick-create-card compact-section">
           <div>
             <strong>Need another player?</strong>
             <p>Use Players → Quick Create Player, then return here and click Refresh Profiles to load the latest local profiles.</p>
@@ -726,7 +729,7 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
           {onOpenPlayers && <button className="ghost-button" onClick={onOpenPlayers} type="button">Quick Create in Players</button>}
         </div>
 
-        <details className="diagnostics-panel context-control-panel" open>
+        <details className="collapsible-card context-control-panel" open>
           <summary>Match Context</summary>
           <p className="helper-text">Context changes should be subtle. Player attributes still dominate.</p>
           <p className="helper-text">{contextHelperText(matchContext)}</p>
@@ -734,7 +737,7 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
             <span className="seed-pill">Scenario Preset:</span>
             <button className="ghost-button" onClick={resetContext} type="button">Reset Context</button>
             {SCENARIOS.map((scenario) => (
-              <button className="ghost-button" key={scenario.label} onClick={() => { setMatchContext(scenario.context); clearGeneratedState(); }} type="button">{scenario.label}</button>
+              <button className="ghost-button scenario-button" key={scenario.label} onClick={() => { setMatchContext(scenario.context); clearGeneratedState(); }} type="button">{scenario.label}</button>
             ))}
           </div>
           <div className="form-grid compact-grid">
@@ -748,7 +751,8 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
           <div className="match-meta-line"><span>{contextText(matchContext)}</span></div>
         </details>
 
-        <div className="editor-card setup-card">
+        <details className="collapsible-card setup-card">
+          <summary>Favorite Match Setups</summary>
           <div className="section-heading">
             <div>
               <p className="eyebrow">Favorite match setups</p>
@@ -771,9 +775,10 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
               </div>
             </>
           )}
-        </div>
+        </details>
 
-        <div className="button-row match-actions">
+        <div className="workflow-step-heading"><span>4</span><div><p className="eyebrow">Simulate</p><h2>Run the lab</h2></div></div>
+        <div className="button-row match-actions simulate-actions">
           <button className="primary-button" disabled={loading !== null || profiles.length < 2 || sameProfileSelected} onClick={calculatePreview} type="button">
             {loading === 'preview' ? 'Calculating…' : 'Calculate Probabilities'}
           </button>
@@ -789,13 +794,16 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
       </div>
 
       {selectedA && selectedB && (
-        <div className="matchup-broadcast-card">
+        <div className="match-preview-section page-stack">
+          <div className="workflow-step-heading"><span>3</span><div><p className="eyebrow">Matchup Preview</p><h2>Selected players</h2></div></div>
+          <div className="matchup-broadcast-card">
           <MatchupPlayerCard profile={selectedA} side="A" />
           <div className="vs-block">
             <span>VS</span>
             <small>{matchType === 'league_timed_3x5' ? 'League Timed 3x5' : 'Tour BO5'}</small>
           </div>
           <MatchupPlayerCard profile={selectedB} side="B" />
+          </div>
         </div>
       )}
 
@@ -828,7 +836,8 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
 
 
       {selectedA && selectedB && (
-        <div className="editor-card batch-card">
+        <details className="collapsible-card batch-card">
+          <summary>Batch Simulate Rivalry</summary>
           <div className="section-heading">
             <div>
               <p className="eyebrow">Batch Simulate Rivalry</p>
@@ -856,10 +865,10 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
               <h3>Scoreline distribution</h3>
               <div className="scoreline-grid">{Object.entries(batchResult.scoreline_distribution).map(([label, count]) => <span key={label}>{label}: {count}</span>)}</div>
               <h3>Sample results</h3>
-              <table className="compact-table"><tbody>{batchResult.sample_results.map((sample) => <tr key={sample.seed}><td>{sample.seed}</td><td>{sample.winner_name}</td><td>{sample.score}</td><td>{sample.total_points} pts</td></tr>)}</tbody></table>
+              <div className="scroll-x"><table className="compact-table"><tbody>{batchResult.sample_results.map((sample) => <tr key={sample.seed}><td>{sample.seed}</td><td>{sample.winner_name}</td><td>{sample.score}</td><td>{sample.total_points} pts</td></tr>)}</tbody></table></div>
             </>
           )}
-        </div>
+        </details>
       )}
 
       {preview && preview.match_type === matchType && preview.player_a.profile_id === playerAProfileId && preview.player_b.profile_id === playerBProfileId && (
@@ -948,7 +957,8 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
       )}
 
       {result && (
-        <>
+        <div className="result-save-section page-stack">
+          <div className="workflow-step-heading"><span>5</span><div><p className="eyebrow">Result / Save</p><h2>Generated match report</h2></div></div>
           <div className="editor-card save-match-panel" id="save-match-panel">
             <div className="section-heading">
               <div>
@@ -979,7 +989,7 @@ export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
             </div>
           </div>
           <MatchResultView result={result} label="Generated result" />
-        </>
+        </div>
       )}
     </section>
   );

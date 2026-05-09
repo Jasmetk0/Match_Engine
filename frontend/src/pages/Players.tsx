@@ -223,20 +223,23 @@ function PlayerProfileOverview({ player, analytics }: { player: PlayerWithProfil
 
   const radarValues = categoryKeys.map(([label, key]) => ({ label: label === 'Attacking' ? 'Attack' : label === 'Defensive' ? 'Defense' : label, value: profile[key] }));
   const recent = analytics?.recent_matches?.slice(0, 8) ?? [];
+  const savedRecord = analytics && analytics.total_matches > 0 ? `${analytics.wins}-${analytics.losses}-${analytics.draws}` : '—';
+  const savedWinRate = analytics && analytics.total_matches > 0 ? `${pct(analytics.win_rate)} win rate` : 'No saved matches';
 
   return (
-    <div className="player-profile-card">
+    <div className="player-profile-card page-stack">
       <div className="profile-hero-panel">
         <div className="profile-identity-block">
           <PlayerAvatar name={player.name} subtitle={player.nationality} handedness={player.handedness} playStyle={profile.play_style} size="lg" />
           <div className="profile-title-copy">
-            <p className="eyebrow">Elite player profile</p>
+            <p className="eyebrow">Player profile</p>
             <h2>{player.name}</h2>
-            <p>{player.nickname ? `“${player.nickname}” · ` : ''}{profile.play_style} · {profile.match_mentality}</p>
+            <p>{player.nickname ? `“${player.nickname}” · ` : ''}{player.nationality} · {profile.play_style} · {player.handedness}-handed</p>
             <div className="profile-pill-row">
               <span className="seed-pill">{profile.season_year} season</span>
               <span className="seed-pill">{profile.injury_status}</span>
-              <span className="seed-pill">{profile.progression_type}</span>
+              <span className="seed-pill">Tour {profile.tournament_rating.toFixed(1)}</span>
+              <span className="seed-pill">League {profile.league_rating.toFixed(1)}</span>
             </div>
           </div>
         </div>
@@ -245,42 +248,38 @@ function PlayerProfileOverview({ player, analytics }: { player: PlayerWithProfil
         )}
       </div>
 
-      <div className="profile-main-grid">
-        <div className="profile-rating-column">
-          <div className="rating-duo">
-            <div className="rating-card featured"><span>Tour rating</span><strong>{profile.tournament_rating.toFixed(1)}</strong><p>BO5 match strength</p></div>
-            <div className="rating-card featured gold"><span>League rating</span><strong>{profile.league_rating.toFixed(1)}</strong><p>Timed 3x5 strength</p></div>
-          </div>
+      <div className="ratings-grid profile-summary-grid">
+        <div className="rating-card featured"><span>Tour rating</span><strong>{profile.tournament_rating.toFixed(1)}</strong><p>BO5 match strength</p></div>
+        <div className="rating-card featured gold"><span>League rating</span><strong>{profile.league_rating.toFixed(1)}</strong><p>Timed 3x5 strength</p></div>
+        <div className="rating-card"><span>Form</span><strong>{Math.round(profile.form)}</strong><p>Current availability signal</p></div>
+        <div className="rating-card"><span>Confidence</span><strong>{Math.round(profile.confidence)}</strong><p>{profile.match_mentality}</p></div>
+        <div className="rating-card"><span>Fatigue</span><strong>{Math.round(profile.fatigue)}</strong><p>{profile.injury_status}</p></div>
+        <div className="rating-card"><span>Saved record</span><strong>{savedRecord}</strong><p>{savedWinRate}</p></div>
+      </div>
+
+      <div className="profile-category-overview">
+        <div className="radar-panel"><RatingRadar values={radarValues} /></div>
+        <div className="profile-category-stack">
           <div className="ratings-grid profile-categories">
             {categoryKeys.map(([label, key]) => <div className="rating-card" key={key}><span>{label}</span><strong>{profile[key].toFixed(1)}</strong></div>)}
           </div>
-          <div className="diagnostic-card">
+          <div className="diagnostic-card compact-section">
             <h3>Scouting notes</h3>
             <p><strong>Personality:</strong> {profile.career_personality}</p>
             <p><strong>Top strengths:</strong> {topAttributes(profile).map((entry) => `${entry.label} ${Math.round(entry.value)}`).join(' · ')}</p>
             {(player.notes || profile.notes) && <p>{profile.notes || player.notes}</p>}
+            <div className="form-strip">
+              <span>Recent saved form</span>
+              <div>{recent.length > 0 ? recent.map((match) => <b className={match.is_draw ? 'draw' : match.winner_name === player.name ? 'win' : 'loss'} key={match.id}>{match.is_draw ? 'D' : match.winner_name === player.name ? 'W' : 'L'}</b>) : <em>No saved matches</em>}</div>
+            </div>
           </div>
-        </div>
-
-        <div className="radar-panel"><RatingRadar values={radarValues} /></div>
-
-        <div className="form-panel">
-          <h3>Form & availability</h3>
-          <MiniMeter label="Form" value={profile.form} />
-          <MiniMeter label="Confidence" value={profile.confidence} tone="gold" />
-          <MiniMeter label="Fatigue" value={profile.fatigue} tone="red" />
-          <div className="form-strip">
-            <span>Recent saved form</span>
-            <div>{recent.length > 0 ? recent.map((match) => <b className={match.is_draw ? 'draw' : match.winner_name === player.name ? 'win' : 'loss'} key={match.id}>{match.is_draw ? 'D' : match.winner_name === player.name ? 'W' : 'L'}</b>) : <em>No saved matches</em>}</div>
-          </div>
-          {analytics && analytics.total_matches > 0 && <p className="form-summary">Saved record {analytics.wins}-{analytics.losses}-{analytics.draws} · {pct(analytics.win_rate)} win rate</p>}
         </div>
       </div>
 
-      <div className="profile-attributes-panel">
-        <div className="section-heading"><div><p className="eyebrow">Attribute map</p><h3>Detailed player toolkit</h3></div></div>
+      <details className="collapsible-card profile-attributes-panel">
+        <summary>Detailed Attributes</summary>
         <AttributeBars attributes={profile.attributes} />
-      </div>
+      </details>
     </div>
   );
 }
@@ -303,7 +302,7 @@ function SavedMatchHistoryCard({ analytics, warning }: { analytics: PlayerAnalyt
         <span>Avg perf: {analytics.average_performance_rating ?? '—'}</span>
       </div>
       <h3>Common opponents</h3>
-      <table className="compact-table"><tbody>{analytics.common_opponents.slice(0, 5).map((opp) => <tr key={opp.opponent_name}><td>{opp.opponent_name}</td><td>{opp.matches}</td><td>{opp.wins}-{opp.losses}-{opp.draws}</td></tr>)}</tbody></table>
+      <div className="scroll-x"><table className="compact-table"><tbody>{analytics.common_opponents.slice(0, 5).map((opp) => <tr key={opp.opponent_name}><td>{opp.opponent_name}</td><td>{opp.matches}</td><td>{opp.wins}-{opp.losses}-{opp.draws}</td></tr>)}</tbody></table></div>
       <h3>Recent saved matches</h3>
       <ul className="compact-list">{analytics.recent_matches.slice(0, 5).map((match) => <li key={match.id}>{match.player_a_name} vs {match.player_b_name} · {match.is_draw ? 'Draw' : `${match.winner_name} won`} · {match.match_score_text}</li>)}</ul>
     </div>
@@ -711,20 +710,25 @@ export function Players() {
           {selected && (
             <>
               <PlayerProfileOverview player={selected} analytics={analytics} />
-              <PlayerForm player={selected} onDelete={() => safe(async () => { if (confirm(`Delete ${selected.name}?`)) { await deletePlayer(selected.id); setSelected(null); await refresh(undefined); } })} onSave={(payload) => safe(async () => { await updatePlayer(selected.id, payload); await refresh(selected.id); })} />
-              <div className="section-heading"><h2>Season profiles</h2><button className="ghost-button" onClick={() => setNewSeason(newProfile())} type="button">Add season profile</button></div>
-              {newSeason && <ProfileEditor player={selected} profile={newSeason} onSave={(payload) => safe(async () => { await createProfile(selected.id, payload); setNewSeason(null); await refresh(selected.id); })} />}
-              {selected.profiles.map((profile) => (
-                <ProfileEditor
-                  key={profile.id}
-                  profile={profile}
-                  player={selected}
-                  onClone={(profileToClone, name, nationality) => safe(async () => cloneProfile(profileToClone, name, nationality))}
-                  onDelete={() => safe(async () => { if (confirm(`Delete ${profile.season_year} profile?`)) { await deleteProfile(profile.id); await refresh(selected.id); } })}
-                  onDuplicate={(seasonYear) => safe(async () => { await duplicateProfile(profile.id, { season_year: seasonYear, apply_skill_inflation: true }); await refresh(selected.id); })}
-                  onSave={(payload) => safe(async () => { await updateProfile(profile.id, payload); await refresh(selected.id); })}
-                />
-              ))}
+              <details className="collapsible-card edit-player-data">
+                <summary>Edit Player Data</summary>
+                <div className="page-stack">
+                  <PlayerForm player={selected} onDelete={() => safe(async () => { if (confirm(`Delete ${selected.name}?`)) { await deletePlayer(selected.id); setSelected(null); await refresh(undefined); } })} onSave={(payload) => safe(async () => { await updatePlayer(selected.id, payload); await refresh(selected.id); })} />
+                  <div className="section-heading"><h2>Season profiles</h2><button className="ghost-button" onClick={() => setNewSeason(newProfile())} type="button">Add season profile</button></div>
+                  {newSeason && <ProfileEditor player={selected} profile={newSeason} onSave={(payload) => safe(async () => { await createProfile(selected.id, payload); setNewSeason(null); await refresh(selected.id); })} />}
+                  {selected.profiles.map((profile) => (
+                    <ProfileEditor
+                      key={profile.id}
+                      profile={profile}
+                      player={selected}
+                      onClone={(profileToClone, name, nationality) => safe(async () => cloneProfile(profileToClone, name, nationality))}
+                      onDelete={() => safe(async () => { if (confirm(`Delete ${profile.season_year} profile?`)) { await deleteProfile(profile.id); await refresh(selected.id); } })}
+                      onDuplicate={(seasonYear) => safe(async () => { await duplicateProfile(profile.id, { season_year: seasonYear, apply_skill_inflation: true }); await refresh(selected.id); })}
+                      onSave={(payload) => safe(async () => { await updateProfile(profile.id, payload); await refresh(selected.id); })}
+                    />
+                  ))}
+                </div>
+              </details>
               <SavedMatchHistoryCard analytics={analytics} warning={analyticsWarning} />
             </>
           )}
