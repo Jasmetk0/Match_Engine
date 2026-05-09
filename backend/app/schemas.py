@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -249,6 +249,15 @@ class DuplicateProfileRequest(BaseModel):
     season_year: SeasonYear
     apply_skill_inflation: bool = True
 
+
+class MatchContext(BaseModel):
+    event_importance: Literal["regular", "major", "world_championship", "final", "rivalry", "exhibition"] = "regular"
+    court_type: Literal["standard_court", "glass_court", "fast_court", "slow_court"] = "standard_court"
+    crowd_environment: Literal["neutral", "home_player_a", "home_player_b", "hostile_to_a", "hostile_to_b"] = "neutral"
+    rest_context: Literal["equal_rest", "player_a_short_rest", "player_b_short_rest", "both_tired"] = "equal_rest"
+    travel_context: Literal["none", "player_a_travel_fatigue", "player_b_travel_fatigue"] = "none"
+    pressure_context: Literal["normal", "media_hype", "legacy_match", "comeback_pressure", "must_win"] = "normal"
+
 SeedValue = int | str | None
 
 
@@ -258,6 +267,7 @@ class MatchBaseRequest(BaseModel):
     seed: SeedValue = None
     match_type: str = "tour_bo5"
     monte_carlo_runs: int = Field(default=500, ge=50, le=3000)
+    match_context: MatchContext = Field(default_factory=MatchContext)
 
     @field_validator("match_type")
     @classmethod
@@ -281,6 +291,7 @@ class MatchBatchRequest(BaseModel):
     seed: SeedValue = None
     match_type: str = "tour_bo5"
     runs: int = Field(default=20, ge=5, le=200)
+    match_context: MatchContext = Field(default_factory=MatchContext)
 
     @field_validator("match_type")
     @classmethod

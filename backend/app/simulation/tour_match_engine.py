@@ -25,6 +25,17 @@ from app.simulation.calibration import (
     style_matchup_summary,
 )
 from app.simulation.match_types import ATTRIBUTE_NAMES, MatchPlayer, MatchState
+from app.simulation.match_context import (
+    context_summary,
+    fatigue_cost_multiplier,
+    initial_fatigue,
+    normalize_match_context,
+    player_context_modifier,
+    pressure_risk_adjustment,
+    rally_length_adjustments,
+    terminal_adjustment,
+    volatility_boost,
+)
 
 
 MAX_PUBLIC_SEED = 2**31 - 1
@@ -120,7 +131,7 @@ def _mentality_modifier(player: MatchPlayer, pressure: str, trailing: bool, stre
     return base, volatility
 
 
-def _effective(player: MatchPlayer, fatigue: float, area: str, pressure: str, trailing: bool, streak_against: int) -> float:
+def _effective(player: MatchPlayer, fatigue: float, area: str, pressure: str, trailing: bool, streak_against: int, context: dict[str, Any] | None = None, player_slot: str = "a") -> float:
     attrs = player.attributes
     if area == "serve":
         raw = attrs["serve_pressure"] * 0.65 + attrs["volley_takeover"] * 0.2 + attrs["shot_selection"] * 0.15 + _style(player, "initiative")
@@ -143,7 +154,8 @@ def _effective(player: MatchPlayer, fatigue: float, area: str, pressure: str, tr
     form_bonus = (player.form - 50) * 0.045 + (player.confidence - 50) * 0.055 + (player.skill_environment - 1.0) * 5
     fatigue_penalty = fatigue * (0.075 if area in {"discipline", "attack"} else 0.105)
     injury_penalty = INJURY_FATIGUE.get(player.injury_status, 0.0) * 0.18
-    return clamp(raw + form_bonus + pressure_bonus - fatigue_penalty - injury_penalty, 1, 105)
+    context_bonus = player_context_modifier(player, player_slot, context, area, pressure, trailing)
+    return clamp(raw + form_bonus + pressure_bonus + context_bonus - fatigue_penalty - injury_penalty, 1, 105)
 
 
 def _weighted_pick(rng: random.Random, items: list[tuple[str, float]]) -> str:
@@ -170,10 +182,11 @@ def _score_text(games: list[dict[str, Any]], a: MatchPlayer, b: MatchPlayer) -> 
     return f"{a_games}-{b_games} ({scores})"
 
 
-def simulate_tour_match(a: MatchPlayer, b: MatchPlayer, seed: int, include_rallies: bool = True) -> dict[str, Any]:
+def simulate_tour_match(a: MatchPlayer, b: MatchPlayer, seed: int, include_rallies: bool = True, match_context: dict[str, Any] | None = None) -> dict[str, Any]:
     rng = random.Random(seed)
+    match_context = normalize_match_context(match_context)
     state = MatchState(
-        fatigue={a.profile_id: float(a.starting_fatigue), b.profile_id: float(b.starting_fatigue)},
+        fatigue={a.profile_id: initial_fatigue(a, "a", match_context), b.profile_id: initial_fatigue(b, "b", match_context)},
         games_won={a.profile_id: 0, b.profile_id: 0},
         points_won={a.profile_id: 0, b.profile_id: 0},
     )
@@ -205,7 +218,7 @@ def simulate_tour_match(a: MatchPlayer, b: MatchPlayer, seed: int, include_ralli
             pressure = _pressure_level(a_points, b_points, state.games_won, a.profile_id, b.profile_id)
             rally = _simulate_rally(
                 rng, a, b, players, opponent, state, server_id, game_no, rally_number + 1, [a_points, b_points], pressure,
-                force_playable=max_let_chain >= 2,
+                force_playable=max_let_chain >= 2, match_context=match_context,
             )
             rally_number += 1
             rallies.append(rally) if include_rallies else None
@@ -243,7 +256,8 @@ def simulate_tour_match(a: MatchPlayer, b: MatchPlayer, seed: int, include_ralli
         # Simple documented rule: the next game starts with the previous game loser serving.
         server_id = opponent[game_winner_id]
         for pid, player in players.items():
-            recovery = FATIGUE_RECOVERY["tour_between_games_base"] + player.attr("recovery_efficiency") * FATIGUE_RECOVERY["tour_recovery_efficiency_factor"] + _style(player, "fatigue") * -1.4
+            travel_penalty = 0.45 if (match_context["travel_context"] == "player_a_travel_fatigue" and pid == a.profile_id) or (match_context["travel_context"] == "player_b_travel_fatigue" and pid == b.profile_id) else 0.0
+            recovery = FATIGUE_RECOVERY["tour_between_games_base"] + player.attr("recovery_efficiency") * FATIGUE_RECOVERY["tour_recovery_efficiency_factor"] + _style(player, "fatigue") * -1.4 - travel_penalty
             state.fatigue[pid] = max(float(players[pid].starting_fatigue) * FATIGUE_RECOVERY["tour_starting_fatigue_floor"], state.fatigue[pid] - recovery)
 
     winner_id = a.profile_id if state.games_won[a.profile_id] == 3 else b.profile_id
@@ -263,12 +277,15 @@ def simulate_tour_match(a: MatchPlayer, b: MatchPlayer, seed: int, include_ralli
         "games": games,
         "rallies": rallies if include_rallies else [],
         "stats": stats,
-        "story": _story(a, b, winner_id, games, stats),
+        "story": _story(a, b, winner_id, games, stats, match_context),
+        "match_context": match_context,
+        "explanation_breakdown": _explanation_breakdown(a, b, winner_id, stats, games, match_context),
+        "key_rallies": _key_rallies_tour(rallies, games, a, b) if include_rallies else [],
         "calibration_debug": calibration_debug(a, b, match_type="tour_bo5", fatigue_impact=fatigue_impact, pressure_impact=pressure_impact),
     }
 
 
-def _simulate_rally(rng: random.Random, a: MatchPlayer, b: MatchPlayer, players: dict[int, MatchPlayer], opponent: dict[int, int], state: MatchState, server_id: int, game_no: int, rally_no: int, score_before: list[int], pressure: str, force_playable: bool) -> dict[str, Any]:
+def _simulate_rally(rng: random.Random, a: MatchPlayer, b: MatchPlayer, players: dict[int, MatchPlayer], opponent: dict[int, int], state: MatchState, server_id: int, game_no: int, rally_no: int, score_before: list[int], pressure: str, force_playable: bool, match_context: dict[str, Any] | None = None) -> dict[str, Any]:
     receiver_id = opponent[server_id]
     server = players[server_id]
     receiver = players[receiver_id]
@@ -277,12 +294,12 @@ def _simulate_rally(rng: random.Random, a: MatchPlayer, b: MatchPlayer, players:
     streak_against_a = state.point_streak_count if state.point_streak_profile_id == b.profile_id else 0
     streak_against_b = state.point_streak_count if state.point_streak_profile_id == a.profile_id else 0
 
-    serve_edge = _effective(server, state.fatigue[server_id], "serve", pressure, server_id == a.profile_id and a_trailing or server_id == b.profile_id and b_trailing, 0)
-    return_edge = _effective(receiver, state.fatigue[receiver_id], "return", pressure, receiver_id == a.profile_id and a_trailing or receiver_id == b.profile_id and b_trailing, 0)
+    serve_edge = _effective(server, state.fatigue[server_id], "serve", pressure, server_id == a.profile_id and a_trailing or server_id == b.profile_id and b_trailing, 0, match_context, "a" if server_id == a.profile_id else "b")
+    return_edge = _effective(receiver, state.fatigue[receiver_id], "return", pressure, receiver_id == a.profile_id and a_trailing or receiver_id == b.profile_id and b_trailing, 0, match_context, "a" if receiver_id == a.profile_id else "b")
     initiative_id = server_id if rng.random() < clamp(0.51 + (serve_edge - return_edge) / 160, 0.30, 0.72) else receiver_id
 
-    control_a = _effective(a, state.fatigue[a.profile_id], "control", pressure, a_trailing, streak_against_a)
-    control_b = _effective(b, state.fatigue[b.profile_id], "control", pressure, b_trailing, streak_against_b)
+    control_a = _effective(a, state.fatigue[a.profile_id], "control", pressure, a_trailing, streak_against_a, match_context, "a")
+    control_b = _effective(b, state.fatigue[b.profile_id], "control", pressure, b_trailing, streak_against_b, match_context, "b")
     if initiative_id == a.profile_id:
         control_a += 3.0
     else:
@@ -292,11 +309,12 @@ def _simulate_rally(rng: random.Random, a: MatchPlayer, b: MatchPlayer, players:
     length_bias = (a.attr("length_quality") + b.attr("length_quality") + a.attr("aerobic_repeatability") + b.attr("aerobic_repeatability")) / 4
     quality_pair = pair_quality(a, b, "tournament_rating")
     chaos = _style(a, "chaos") + _style(b, "chaos") + _style(a, "volatility") + _style(b, "volatility")
+    context_lengths = rally_length_adjustments(match_context)
     length_type = _weighted_pick(rng, [
-        ("short", TOUR_RALLY_LENGTH_WEIGHTS["short"] + _style(players[initiative_id], "short") + max(0, 60 - length_bias) * 0.07 + chaos),
-        ("medium", TOUR_RALLY_LENGTH_WEIGHTS["medium"] + quality_pair * 1.8),
-        ("long", TOUR_RALLY_LENGTH_WEIGHTS["long"] + max(0, length_bias - 50) * 0.22 + _style(a, "long") + _style(b, "long") + quality_pair * 4.0),
-        ("brutal", TOUR_RALLY_LENGTH_WEIGHTS["brutal"] + max(0, length_bias - 65) * 0.16 + (_style(a, "long") + _style(b, "long")) * 0.55 + quality_pair * 2.0),
+        ("short", TOUR_RALLY_LENGTH_WEIGHTS["short"] + context_lengths["short"] + _style(players[initiative_id], "short") + max(0, 60 - length_bias) * 0.07 + chaos + volatility_boost(match_context) * 0.2),
+        ("medium", TOUR_RALLY_LENGTH_WEIGHTS["medium"] + context_lengths["medium"] + quality_pair * 1.8),
+        ("long", TOUR_RALLY_LENGTH_WEIGHTS["long"] + context_lengths["long"] + max(0, length_bias - 50) * 0.22 + _style(a, "long") + _style(b, "long") + quality_pair * 4.0),
+        ("brutal", TOUR_RALLY_LENGTH_WEIGHTS["brutal"] + context_lengths["brutal"] + max(0, length_bias - 65) * 0.16 + (_style(a, "long") + _style(b, "long")) * 0.55 + quality_pair * 2.0),
     ])
     lo, hi = TOUR_RALLY_SHOT_RANGES[length_type]
     rally_shots = rng.randint(lo, hi)
@@ -305,9 +323,9 @@ def _simulate_rally(rng: random.Random, a: MatchPlayer, b: MatchPlayer, players:
     if not force_playable and rng.random() < clamp(0.010 + (abs(control_a - control_b) < 4) * 0.006, 0.004, 0.022):
         return _rally_event(rally_no, game_no, server_id, None, None, score_before, score_before, rally_shots, duration, length_type, "let_replayed", "scramble_defense", pressure, initiative_id, t_control_id, state, "Traffic through the middle forced a let and the rally will be replayed.")
 
-    winner_id, terminal, pattern = _decide_scoring_outcome(rng, a, b, state, pressure, length_type, initiative_id, t_control_id, a_trailing, b_trailing, streak_against_a, streak_against_b)
+    winner_id, terminal, pattern = _decide_scoring_outcome(rng, a, b, state, pressure, length_type, initiative_id, t_control_id, a_trailing, b_trailing, streak_against_a, streak_against_b, match_context)
     loser_id = opponent[winner_id]
-    _apply_fatigue(a, b, state, rally_shots, duration, length_type, t_control_id, loser_id)
+    _apply_fatigue(a, b, state, rally_shots, duration, length_type, t_control_id, loser_id, match_context)
     if state.point_streak_profile_id == winner_id:
         state.point_streak_count += 1
     else:
@@ -318,16 +336,16 @@ def _simulate_rally(rng: random.Random, a: MatchPlayer, b: MatchPlayer, players:
     return _rally_event(rally_no, game_no, server_id, winner_id, loser_id, score_before, score_before[:], rally_shots, duration, length_type, terminal, pattern, pressure, initiative_id, t_control_id, state, explanation)
 
 
-def _decide_scoring_outcome(rng: random.Random, a: MatchPlayer, b: MatchPlayer, state: MatchState, pressure: str, length_type: str, initiative_id: int, t_control_id: int, a_trailing: bool, b_trailing: bool, streak_a: int, streak_b: int) -> tuple[int, str, str]:
+def _decide_scoring_outcome(rng: random.Random, a: MatchPlayer, b: MatchPlayer, state: MatchState, pressure: str, length_type: str, initiative_id: int, t_control_id: int, a_trailing: bool, b_trailing: bool, streak_a: int, streak_b: int, match_context: dict[str, Any] | None = None) -> tuple[int, str, str]:
     players = {a.profile_id: a, b.profile_id: b}
     scores: dict[int, float] = {}
     terms: dict[int, str] = {}
     patterns: dict[int, str] = {}
     for p, opp, trailing, streak in [(a, b, a_trailing, streak_a), (b, a, b_trailing, streak_b)]:
-        attack = _effective(p, state.fatigue[p.profile_id], "attack", pressure, trailing, streak)
-        defense = _effective(p, state.fatigue[p.profile_id], "defense", pressure, trailing, streak)
-        discipline = _effective(p, state.fatigue[p.profile_id], "discipline", pressure, trailing, streak)
-        opp_discipline = _effective(opp, state.fatigue[opp.profile_id], "discipline", pressure, not trailing, 0)
+        attack = _effective(p, state.fatigue[p.profile_id], "attack", pressure, trailing, streak, match_context, "a" if p.profile_id == a.profile_id else "b")
+        defense = _effective(p, state.fatigue[p.profile_id], "defense", pressure, trailing, streak, match_context, "a" if p.profile_id == a.profile_id else "b")
+        discipline = _effective(p, state.fatigue[p.profile_id], "discipline", pressure, trailing, streak, match_context, "a" if p.profile_id == a.profile_id else "b")
+        opp_discipline = _effective(opp, state.fatigue[opp.profile_id], "discipline", pressure, not trailing, 0, match_context, "a" if opp.profile_id == a.profile_id else "b")
         long_bonus = (_style(p, "long") + p.attr("aerobic_repeatability") * 0.025) if length_type in {"long", "brutal"} else 0
         if p.play_style == "Game Reader" and len(state.games_won) and sum(state.games_won.values()) >= 1:
             long_bonus += _style(p, "adapt") * 0.6
@@ -340,8 +358,8 @@ def _decide_scoring_outcome(rng: random.Random, a: MatchPlayer, b: MatchPlayer, 
         scores[p.profile_id] = attack * 0.30 + defense * 0.24 + discipline * 0.21 + p.rating("tactical_rating") * 0.14 + p.rating("physical_rating") * 0.11 + initiative_bonus + control_bonus + long_bonus + tired_target + pressure_style
         base_rates = TERMINAL_EVENT_BASE_RATES["tour"]
         win_weights = [
-            ("winner", base_rates["winner"] + attack * 0.40 + _style(p, "attack") * 2.1 + _style(p, "deception") * 0.8),
-            ("forced_error", base_rates["forced_error"] + defense * 0.24 + attack * 0.13 + max(0, 80 - opp_discipline) * 0.30),
+            ("winner", base_rates["winner"] + attack * 0.40 + _style(p, "attack") * 2.1 + _style(p, "deception") * 0.8 + terminal_adjustment(match_context, "winner")),
+            ("forced_error", base_rates["forced_error"] + defense * 0.24 + attack * 0.13 + max(0, 80 - opp_discipline) * 0.30 + terminal_adjustment(match_context, "forced_error")),
             ("stroke", base_rates["stroke"] + (4.5 if t_control_id == p.profile_id and length_type in {"short", "medium"} else 0.0)),
         ]
         if length_type in {"long", "brutal"}:
@@ -353,11 +371,11 @@ def _decide_scoring_outcome(rng: random.Random, a: MatchPlayer, b: MatchPlayer, 
     loser = players[b.profile_id if winner_id == a.profile_id else a.profile_id]
     winner = players[winner_id]
     # A winner can still receive the point from the opponent's unforced error.
-    loser_disc = _effective(loser, state.fatigue[loser.profile_id], "discipline", pressure, False, 0)
+    loser_disc = _effective(loser, state.fatigue[loser.profile_id], "discipline", pressure, False, 0, match_context, "a" if loser.profile_id == a.profile_id else "b")
     pressure_error = {"normal": 0, "important": 2.0, "game_ball": 4.2, "match_ball": 5.4}[pressure]
     elite_suppression = elite_modifier(loser, "tournament_rating") * ELITE_QUALITY["error_suppression"]
     volatility = max(0.0, _style(loser, "volatility") - elite_suppression * 3.0)
-    risk = max(2.0, 20 - loser_disc * 0.15 + state.fatigue[loser.profile_id] * 0.050 + _style(loser, "risk") * 1.7 + volatility + pressure_error)
+    risk = max(2.0, 20 - loser_disc * 0.15 + state.fatigue[loser.profile_id] * 0.050 + _style(loser, "risk") * 1.7 + volatility + pressure_error + pressure_risk_adjustment(match_context, pressure) + volatility_boost(match_context))
     floor = TERMINAL_EVENT_BASE_RATES["tour"]["unforced_error_floor"]
     cap = TERMINAL_EVENT_BASE_RATES["tour"]["unforced_error_cap"] - elite_suppression * 0.08
     if rng.random() < clamp(risk / 100, floor, cap):
@@ -385,12 +403,12 @@ def _pattern_for(player: MatchPlayer, terminal: str, length_type: str, had_initi
     return "deep_length_exchange" if length_type != "brutal" else "scramble_defense"
 
 
-def _apply_fatigue(a: MatchPlayer, b: MatchPlayer, state: MatchState, shots: int, duration: float, length_type: str, t_control_id: int, loser_id: int) -> None:
+def _apply_fatigue(a: MatchPlayer, b: MatchPlayer, state: MatchState, shots: int, duration: float, length_type: str, t_control_id: int, loser_id: int, match_context: dict[str, Any] | None = None) -> None:
     config = FATIGUE_ACCUMULATION["tour"]
     multiplier = config[length_type]
     for p in (a, b):
         attr_resist = p.attr("aerobic_repeatability") * 0.35 + p.attr("recovery_efficiency") * 0.25 + p.attr("durability") * 0.25 + p.attr("t_recovery") * 0.15
-        base = (duration * config["duration"] + shots * config["shots"]) * multiplier
+        base = (duration * config["duration"] + shots * config["shots"]) * multiplier * fatigue_cost_multiplier(match_context, length_type)
         scramble = config["scramble"] if p.profile_id != t_control_id else 0.0
         losing_burden = config["losing"] if p.profile_id == loser_id else 0.0
         injury = INJURY_FATIGUE.get(p.injury_status, 0.0) * 0.015
@@ -546,7 +564,7 @@ def _explanation(winner: MatchPlayer, loser: MatchPlayer, terminal: str, pattern
     return "The rally was replayed after traffic interrupted the line to the ball."
 
 
-def _story(a: MatchPlayer, b: MatchPlayer, winner_id: int, games: list[dict[str, Any]], stats: dict[str, Any]) -> dict[str, str]:
+def _story(a: MatchPlayer, b: MatchPlayer, winner_id: int, games: list[dict[str, Any]], stats: dict[str, Any], match_context: dict[str, Any] | None = None) -> dict[str, str]:
     winner = a if winner_id == a.profile_id else b
     loser = b if winner_id == a.profile_id else a
     wid = str(winner.profile_id)
@@ -559,5 +577,68 @@ def _story(a: MatchPlayer, b: MatchPlayer, winner_id: int, games: list[dict[str,
         "style_summary": style_matchup_summary(a, b, match_type="tour_bo5"),
         "fatigue_summary": f"Final fatigue was {stats['fatigue_final'][str(a.profile_id)]} for {a.name} and {stats['fatigue_final'][str(b.profile_id)]} for {b.name}; long and brutal rallies now carry extra recovery cost without overwhelming elite endurance.",
         "pressure_summary": f"Game and match ball conversion finished {stats['game_balls_converted'][wid]}/{stats['game_balls_created'][wid]} for {winner.name}, with composure, discipline and mentality suppressing random pressure errors.",
-        "explanation": "The simulation resolved every rally through serve/return initiative, T control, rally length, terminal event risk, fatigue and pressure modifiers.",
+        "context_summary": context_summary(match_context),
+        "explanation": "The simulation resolved every rally through serve/return initiative, T control, rally length, terminal event risk, fatigue, pressure and subtle match-context modifiers.",
+    }
+
+
+
+def _key_rally_entry(rally: dict[str, Any], reason: str, players: dict[int, MatchPlayer]) -> dict[str, Any]:
+    winner_id = rally.get("winner_profile_id")
+    return {
+        "reason": reason,
+        "game_number": rally.get("game_number"),
+        "rally_number": rally.get("rally_number"),
+        "score_before": rally.get("score_before"),
+        "winner": players[winner_id].name if winner_id in players else "Let",
+        "terminal_type": rally.get("terminal_type"),
+        "rally_shots": rally.get("rally_shots"),
+        "rally_duration_seconds": rally.get("rally_duration_seconds"),
+        "explanation": rally.get("explanation", "Key pressure exchange."),
+    }
+
+
+def _key_rallies_tour(rallies: list[dict[str, Any]], games: list[dict[str, Any]], a: MatchPlayer, b: MatchPlayer) -> list[dict[str, Any]]:
+    players = {a.profile_id: a, b.profile_id: b}
+    scoring = [r for r in rallies if r.get("terminal_type") != "let_replayed"]
+    picked: list[tuple[int, str, dict[str, Any]]] = []
+    seen: set[int] = set()
+    def add(r: dict[str, Any] | None, reason: str, priority: int) -> None:
+        if not r or id(r) in seen:
+            return
+        seen.add(id(r)); picked.append((priority, reason, r))
+    for r in scoring:
+        before = r.get("score_before", [0, 0])
+        if r.get("pressure_level") == "match_ball": add(r, "match ball", 1)
+        elif r.get("pressure_level") == "game_ball": add(r, "game ball", 2)
+        elif before in ([9, 9], [10, 10]): add(r, "9-9 / 10-10 pressure rally", 3)
+        if r.get("game_number") == len(games) and len(games) >= 5 and max(before) >= 7:
+            add(r, "decisive final-game rally", 4)
+    add(max(scoring, key=lambda r: r.get("rally_shots", 0), default=None), "longest rally", 2)
+    last = None; streak = 0
+    for r in scoring:
+        wid = r.get("winner_profile_id")
+        if last == wid:
+            streak += 1
+        else:
+            if streak >= 4:
+                add(r, "first rally after a long streak", 5)
+            last = wid; streak = 1
+    return [_key_rally_entry(r, reason, players) for _, reason, r in sorted(picked, key=lambda item: (item[0], item[2].get("rally_number", 0)))[:12]][:12]
+
+
+def _explanation_breakdown(a: MatchPlayer, b: MatchPlayer, winner_id: int, stats: dict[str, Any], games: list[dict[str, Any]], match_context: dict[str, Any] | None) -> dict[str, str]:
+    winner = a if winner_id == a.profile_id else b
+    loser = b if winner_id == a.profile_id else a
+    wid = str(winner.profile_id); lid = str(loser.profile_id)
+    rating_edge = winner.rating("tournament_rating") - loser.rating("tournament_rating")
+    pressure_won = stats.get("pressure_points_won", {})
+    return {
+        "rating_factor": f"{winner.name} entered with a {rating_edge:.1f} Tour rating edge over {loser.name}." if rating_edge >= 0 else f"{winner.name} overcame a {abs(rating_edge):.1f} Tour rating deficit.",
+        "style_factor": f"{winner.name}'s {winner.play_style} profile translated into {stats.get('winners', {}).get(wid, 0)} winners and {stats.get('forced_errors_won', {}).get(wid, 0)} forced errors won.",
+        "context_factor": f"Context was {context_summary(match_context)}; it nudged pressure, court pace, crowd and fatigue without replacing attributes.",
+        "pressure_factor": f"Pressure points finished {pressure_won.get(wid, 0)}-{pressure_won.get(lid, 0)} for the winner.",
+        "fatigue_factor": f"Final fatigue was {stats.get('fatigue_final', {}).get(wid, '—')} for {winner.name} and {stats.get('fatigue_final', {}).get(lid, '—')} for {loser.name}.",
+        "key_rallies_factor": f"The scoreline included {sum(1 for g in games if abs(g['score'][0] - g['score'][1]) <= 2)} tight game(s), making extracted key rallies decisive for interpretation.",
+        "randomness_factor": "Rally-level randomness still mattered, but each random draw was bounded by ratings, style, pressure, fatigue and context.",
     }

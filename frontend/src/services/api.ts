@@ -199,12 +199,22 @@ export async function resetSampleData(): Promise<Player[]> {
   return request<Player[]>('/dev/reset-sample-data', { method: 'POST' });
 }
 
+export type MatchContext = {
+  event_importance: 'regular' | 'major' | 'world_championship' | 'final' | 'rivalry' | 'exhibition';
+  court_type: 'standard_court' | 'glass_court' | 'fast_court' | 'slow_court';
+  crowd_environment: 'neutral' | 'home_player_a' | 'home_player_b' | 'hostile_to_a' | 'hostile_to_b';
+  rest_context: 'equal_rest' | 'player_a_short_rest' | 'player_b_short_rest' | 'both_tired';
+  travel_context: 'none' | 'player_a_travel_fatigue' | 'player_b_travel_fatigue';
+  pressure_context: 'normal' | 'media_hype' | 'legacy_match' | 'comeback_pressure' | 'must_win';
+};
+
 export type MatchRequest = {
   player_a_profile_id: number;
   player_b_profile_id: number;
   seed?: number | string | null;
   match_type?: 'tour_bo5' | 'league_timed_3x5';
   monte_carlo_runs?: number;
+  match_context?: MatchContext;
 };
 
 export type MatchPlayerSummary = {
@@ -256,6 +266,27 @@ export type MatchPreviewResponse = {
   final_minute_decider_probability?: number;
   pace_edge_summary?: string;
   league_suitability_summary?: string;
+  match_context?: MatchContext;
+  context_summary?: string;
+  rating_edge?: number;
+  style_edge?: string;
+  context_edge?: number;
+  pressure_edge?: number;
+  fatigue_edge?: number;
+  volatility_index?: number;
+  expected_closeness?: number;
+  upset_probability_estimate?: number;
+  key_advantages?: string[];
+  risk_factors?: string[];
+  tactical_preview?: string;
+  expected_long_rally_share?: number;
+  expected_pressure_point_share?: number;
+  expected_clean_time_range?: [number, number];
+  expected_broadcast_time_range?: [number, number];
+  expected_points_per_minute_range?: [number, number];
+  expected_draw_risk?: number;
+  expected_final_minute_importance?: number;
+  likely_clock_pattern?: string;
   preview_diagnostics?: Record<string, unknown>;
 };
 
@@ -298,6 +329,8 @@ export type GameSummary = {
   lead_changes?: number;
 };
 
+export type KeyRally = RallyEvent & { reason: string; winner: string };
+
 export type MatchGenerateResponse = {
   match_type: string;
   seed: number;
@@ -311,6 +344,9 @@ export type MatchGenerateResponse = {
   rallies: RallyEvent[];
   stats: Record<string, any>;
   story: Record<string, string>;
+  match_context?: MatchContext;
+  explanation_breakdown?: Record<string, string>;
+  key_rallies?: KeyRally[];
   calibration_debug?: Record<string, unknown>;
 };
 
@@ -477,6 +513,9 @@ export type BatchMatchResponse = {
   sample_results: { seed: number; winner_name: string; is_draw: boolean; score: string; total_points: number }[];
   style_summary: string;
   recommendation_summary: string;
+  match_context?: MatchContext;
+  context_summary?: string;
+  context_shift_summary?: string;
 };
 
 export async function getPlayerAnalytics(playerName: string): Promise<PlayerAnalytics> {
@@ -492,7 +531,7 @@ export async function getPlayersLeaderboard(): Promise<PlayerLeaderboardRow[]> {
   return request<PlayerLeaderboardRow[]>('/analytics/players');
 }
 
-export async function batchSimulateMatch(payload: { player_a_profile_id: number; player_b_profile_id: number; match_type: 'tour_bo5' | 'league_timed_3x5'; seed?: number | string | null; runs: number }): Promise<BatchMatchResponse> {
+export async function batchSimulateMatch(payload: { player_a_profile_id: number; player_b_profile_id: number; match_type: 'tour_bo5' | 'league_timed_3x5'; seed?: number | string | null; runs: number; match_context?: MatchContext }): Promise<BatchMatchResponse> {
   return request<BatchMatchResponse>('/match/batch', { method: 'POST', body: JSON.stringify(payload) });
 }
 

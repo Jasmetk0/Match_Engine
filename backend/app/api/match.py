@@ -7,6 +7,7 @@ from app.models.player import PlayerSeasonProfile
 from app.schemas import MatchBatchRequest, MatchGenerateRequest, MatchGenerateResponse, MatchPreviewRequest, MatchPreviewResponse
 from app.simulation.league_timed_engine import preview_league_probabilities, simulate_league_timed_match
 from app.simulation.probabilities import preview_probabilities
+from app.simulation.match_context import context_summary
 from app.simulation.tour_match_engine import build_match_player, child_seed, normalize_seed, simulate_tour_match
 
 router = APIRouter(prefix="/match", tags=["match"])
@@ -66,8 +67,8 @@ def match_preview(payload: MatchPreviewRequest, db: Session = Depends(get_db)):
     a, b = _load_players(db, payload.player_a_profile_id, payload.player_b_profile_id)
     seed = normalize_seed(payload.seed)
     if payload.match_type == "league_timed_3x5":
-        return preview_league_probabilities(a, b, seed, payload.monte_carlo_runs)
-    return preview_probabilities(a, b, seed, payload.monte_carlo_runs)
+        return preview_league_probabilities(a, b, seed, payload.monte_carlo_runs, payload.match_context.model_dump())
+    return preview_probabilities(a, b, seed, payload.monte_carlo_runs, payload.match_context.model_dump())
 
 
 @router.post("/generate", response_model=MatchGenerateResponse)
@@ -75,8 +76,8 @@ def match_generate(payload: MatchGenerateRequest, db: Session = Depends(get_db))
     a, b = _load_players(db, payload.player_a_profile_id, payload.player_b_profile_id)
     seed = normalize_seed(payload.seed)
     if payload.match_type == "league_timed_3x5":
-        return simulate_league_timed_match(a, b, seed, include_rallies=True)
-    return simulate_tour_match(a, b, seed, include_rallies=True)
+        return simulate_league_timed_match(a, b, seed, include_rallies=True, match_context=payload.match_context.model_dump())
+    return simulate_tour_match(a, b, seed, include_rallies=True, match_context=payload.match_context.model_dump())
 
 
 @router.post("/batch")
@@ -93,7 +94,7 @@ def match_batch(payload: MatchBatchRequest, db: Session = Depends(get_db)):
 
     for index in range(payload.runs):
         run_seed = normalize_seed(child_seed(base_seed, index + 1))
-        result = simulate_league_timed_match(a, b, run_seed, include_rallies=False) if payload.match_type == "league_timed_3x5" else simulate_tour_match(a, b, run_seed, include_rallies=False)
+        result = simulate_league_timed_match(a, b, run_seed, include_rallies=False, match_context=payload.match_context.model_dump()) if payload.match_type == "league_timed_3x5" else simulate_tour_match(a, b, run_seed, include_rallies=False, match_context=payload.match_context.model_dump())
         winner_id = result.get("winner", {}).get("profile_id") if result.get("winner") else None
         wins[winner_id] = wins.get(winner_id, 0) + 1
         stats = result.get("stats", {})
@@ -124,6 +125,9 @@ def match_batch(payload: MatchBatchRequest, db: Session = Depends(get_db)):
         "match_type": payload.match_type,
         "runs": payload.runs,
         "base_seed": base_seed,
+        "match_context": payload.match_context.model_dump(),
+        "context_summary": context_summary(payload.match_context.model_dump()),
+        "context_shift_summary": "Context was applied to every unsaved run; compare against Neutral regular match to estimate shifted win rates.",
         "player_a": a.public_dict(),
         "player_b": b.public_dict(),
         "player_a_wins": a_wins,
