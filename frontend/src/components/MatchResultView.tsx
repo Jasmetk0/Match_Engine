@@ -44,13 +44,32 @@ function valueText(value: unknown, suffix = '') {
   return value === null || value === undefined || value === '' ? '—' : `${value}${suffix}`;
 }
 
+
+function reportTitle(result: MatchGenerateResponse) {
+  const format = result.match_type === 'league_timed_3x5' ? 'League Timed 3x5 Match Report' : 'Tour BO5 Match Report';
+  const context = result.match_context;
+  if (!context) return format;
+  const neutral = context.event_importance === 'regular'
+    && context.court_type === 'standard_court'
+    && context.crowd_environment === 'neutral'
+    && context.rest_context === 'equal_rest'
+    && context.travel_context === 'none'
+    && context.pressure_context === 'normal';
+  if (neutral) return format;
+  const tags = [context.event_importance, context.crowd_environment, context.rest_context, context.pressure_context]
+    .filter((value) => !['regular', 'neutral', 'equal_rest', 'normal'].includes(value))
+    .map((value) => value.replace(/_/g, ' '));
+  return `${format} · ${tags.join(' · ') || 'context active'}`;
+}
+
 function matchReport(result: MatchGenerateResponse) {
   const stats = result.stats ?? {};
   const story = result.story ?? {};
   const why = result.explanation_breakdown ?? {};
   const keyRallies = result.key_rallies ?? [];
   return [
-    `MATCH REPORT: ${result.player_a.name} vs ${result.player_b.name}`,
+    reportTitle(result),
+    `${result.player_a.name} vs ${result.player_b.name}`,
     `Match type: ${result.match_type}`,
     `Context: ${humanContext(result.match_context as Record<string, unknown> | undefined)}`,
     `Seed: ${result.seed}`,

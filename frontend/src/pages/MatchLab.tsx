@@ -83,7 +83,22 @@ function previewContextEdgeText(preview: MatchPreviewResponse) {
   return `Context edge favors ${totalEdge >= 0 ? preview.player_a.name : preview.player_b.name} slightly.`;
 }
 
-type ProfileOption = SeasonProfile & { playerName: string };
+type ProfileOption = SeasonProfile & { playerName: string; nationality?: string | null; playerCreatedAt?: string; playerUpdatedAt?: string; playerNotes?: string | null };
+
+type ProfileFilter = 'all' | 'top-tour' | 'top-league' | '2030' | 'custom';
+
+type SavedSetup = {
+  id: string;
+  label: string;
+  player_a_profile_id: number | '';
+  player_b_profile_id: number | '';
+  match_type: 'tour_bo5' | 'league_timed_3x5';
+  seed: string;
+  match_context: MatchContext;
+  monte_carlo_runs: number;
+};
+
+const SETUPS_STORAGE_KEY = 'squash-match-lab:setups';
 
 function pct(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
@@ -96,8 +111,71 @@ function minutes(seconds: number | null | undefined) {
 }
 
 function profileLabel(profile: ProfileOption) {
-  return `${profile.playerName} · ${profile.season_year} · Tour ${profile.tournament_rating.toFixed(1)} / League ${profile.league_rating.toFixed(1)}`;
+  const nationality = profile.nationality ? ` · ${profile.nationality}` : '';
+  return `${profile.playerName}${nationality} · ${profile.season_year} · ${profile.play_style} · Tour ${profile.tournament_rating.toFixed(1)} · League ${profile.league_rating.toFixed(1)}`;
 }
+
+function formatEdge(value: number, firstName: string, secondName: string) {
+  const abs = Math.abs(value).toFixed(1);
+  if (Math.abs(value) < 0.05) return 'Even';
+  return `${value > 0 ? firstName : secondName} +${abs}`;
+}
+
+const ATTRIBUTE_LABELS: { key: keyof SeasonProfile['attributes']; label: string }[] = [
+  { key: 'serve_pressure', label: 'Serve pressure' },
+  { key: 'return_initiative', label: 'Return initiative' },
+  { key: 'length_quality', label: 'Length quality' },
+  { key: 'width_control', label: 'Width control' },
+  { key: 'volley_takeover', label: 'Volley takeover' },
+  { key: 'front_court_touch', label: 'Front-court touch' },
+  { key: 'finishing_power', label: 'Finishing power' },
+  { key: 'first_step_cod', label: 'First-step/COD' },
+  { key: 't_recovery', label: 'T recovery' },
+  { key: 'aerobic_repeatability', label: 'Aerobic repeatability' },
+  { key: 'recovery_efficiency', label: 'Recovery efficiency' },
+  { key: 'anticipation', label: 'Anticipation' },
+  { key: 'shot_selection', label: 'Shot selection' },
+  { key: 'adaptability', label: 'Adaptability' },
+  { key: 'composure', label: 'Composure' },
+  { key: 'error_discipline', label: 'Error discipline' },
+  { key: 'deception_creativity', label: 'Deception creativity' },
+  { key: 'durability', label: 'Durability' },
+];
+
+function biggestAdvantages(a: ProfileOption, b: ProfileOption, side: 'a' | 'b') {
+  return ATTRIBUTE_LABELS
+    .map(({ key, label }) => ({ label, diff: (a.attributes[key] ?? 0) - (b.attributes[key] ?? 0) }))
+    .filter((entry) => side === 'a' ? entry.diff > 0 : entry.diff < 0)
+    .sort((left, right) => side === 'a' ? right.diff - left.diff : left.diff - right.diff)
+    .slice(0, 3)
+    .map((entry) => `${entry.label} +${Math.abs(entry.diff).toFixed(1)}`);
+}
+
+function styleMatchupNote(a: ProfileOption, b: ProfileOption) {
+  if (a.play_style === b.play_style) return `Mirror-ish style matchup: both profiles are ${a.play_style}.`;
+  const aAttack = a.attacking_rating - a.defensive_rating;
+  const bAttack = b.attacking_rating - b.defensive_rating;
+  if (aAttack > 3 && bAttack < -3) return `${a.playerName}'s attacking profile tests ${b.playerName}'s defensive base.`;
+  if (bAttack > 3 && aAttack < -3) return `${b.playerName}'s attacking profile tests ${a.playerName}'s defensive base.`;
+  if (a.physical_rating + a.mental_rating > b.physical_rating + b.mental_rating + 6) return `${a.playerName} may be better equipped for long physical pressure phases.`;
+  if (b.physical_rating + b.mental_rating > a.physical_rating + a.mental_rating + 6) return `${b.playerName} may be better equipped for long physical pressure phases.`;
+  return `${a.play_style} vs ${b.play_style}: compare initiative, recovery and shot selection before choosing format.`;
+}
+
+function setupStorageAvailable() {
+  return typeof window !== 'undefined' && Boolean(window.localStorage);
+}
+
+function readSavedSetups(): SavedSetup[] {
+  if (!setupStorageAvailable()) return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SETUPS_STORAGE_KEY) ?? '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
 
 function randomSeed() {
   const values = new Uint32Array(1);
@@ -107,13 +185,18 @@ function randomSeed() {
 
 type MatchLabProps = {
   onOpenSavedMatches?: () => void;
+  onOpenPlayers?: () => void;
 };
 
-export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
+export function MatchLab({ onOpenSavedMatches, onOpenPlayers }: MatchLabProps) {
   const [profiles, setProfiles] = useState<ProfileOption[]>([]);
+  const [profileSearch, setProfileSearch] = useState('');
+  const [profileFilter, setProfileFilter] = useState<ProfileFilter>('all');
   const [playerAProfileId, setPlayerAProfileId] = useState<number | ''>('');
   const [playerBProfileId, setPlayerBProfileId] = useState<number | ''>('');
   const [seed, setSeed] = useState('squash-lab-1');
+  const [seedLocked, setSeedLocked] = useState(false);
+  const [seedMessage, setSeedMessage] = useState<string | null>(null);
   const [runs, setRuns] = useState(500);
   const [matchType, setMatchType] = useState<'tour_bo5' | 'league_timed_3x5'>('tour_bo5');
   const [matchContext, setMatchContext] = useState<MatchContext>(DEFAULT_CONTEXT);
@@ -124,6 +207,12 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
   const [saveTitle, setSaveTitle] = useState('');
   const [saveNotes, setSaveNotes] = useState('');
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [savedMatchId, setSavedMatchId] = useState<number | null>(null);
+  const [savedSignature, setSavedSignature] = useState<string | null>(null);
+  const [setupLabel, setSetupLabel] = useState('');
+  const [savedSetups, setSavedSetups] = useState<SavedSetup[]>(() => readSavedSetups());
+  const [selectedSetupId, setSelectedSetupId] = useState('');
+  const [setupMessage, setSetupMessage] = useState<string | null>(null);
   const [batchRuns, setBatchRuns] = useState(20);
   const [batchResult, setBatchResult] = useState<BatchMatchResponse | null>(null);
 
@@ -133,7 +222,14 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
         setLoading('profiles');
         const players = await listPlayers();
         const loaded = await Promise.all(players.map((player) => getPlayer(player.id)));
-        const options = loaded.flatMap((player) => player.profiles.map((profile) => ({ ...profile, playerName: player.name })));
+        const options = loaded.flatMap((player) => player.profiles.map((profile) => ({
+          ...profile,
+          playerName: player.name,
+          nationality: player.nationality,
+          playerCreatedAt: player.created_at,
+          playerUpdatedAt: player.updated_at,
+          playerNotes: player.notes,
+        })));
         setProfiles(options);
         setPlayerAProfileId((current) => current || options[0]?.id || '');
         setPlayerBProfileId((current) => current || options[1]?.id || '');
@@ -148,12 +244,45 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
 
   const selectedA = useMemo(() => profiles.find((profile) => profile.id === playerAProfileId), [profiles, playerAProfileId]);
   const selectedB = useMemo(() => profiles.find((profile) => profile.id === playerBProfileId), [profiles, playerBProfileId]);
+  const topTourCutoff = useMemo(() => [...profiles].sort((a, b) => b.tournament_rating - a.tournament_rating)[Math.min(9, profiles.length - 1)]?.tournament_rating ?? Number.NEGATIVE_INFINITY, [profiles]);
+  const topLeagueCutoff = useMemo(() => [...profiles].sort((a, b) => b.league_rating - a.league_rating)[Math.min(9, profiles.length - 1)]?.league_rating ?? Number.NEGATIVE_INFINITY, [profiles]);
+  const filteredProfiles = useMemo(() => {
+    const query = profileSearch.trim().toLowerCase();
+    return profiles.filter((profile) => {
+      const customish = profile.playerNotes?.toLowerCase().includes('custom') || profile.notes?.toLowerCase().includes('custom') || profile.season_year !== 2030;
+      const filterMatch = profileFilter === 'all'
+        || (profileFilter === 'top-tour' && profile.tournament_rating >= topTourCutoff)
+        || (profileFilter === 'top-league' && profile.league_rating >= topLeagueCutoff)
+        || (profileFilter === '2030' && profile.season_year === 2030)
+        || (profileFilter === 'custom' && customish);
+      if (!filterMatch) return false;
+      if (!query) return true;
+      return profileLabel(profile).toLowerCase().includes(query) || profile.career_personality.toLowerCase().includes(query) || profile.match_mentality.toLowerCase().includes(query);
+    });
+  }, [profileSearch, profileFilter, profiles, topTourCutoff, topLeagueCutoff]);
+  const comparison = useMemo(() => {
+    if (!selectedA || !selectedB) return null;
+    return {
+      tourEdge: formatEdge(selectedA.tournament_rating - selectedB.tournament_rating, selectedA.playerName, selectedB.playerName),
+      leagueEdge: formatEdge(selectedA.league_rating - selectedB.league_rating, selectedA.playerName, selectedB.playerName),
+      physicalEdge: formatEdge(selectedA.physical_rating - selectedB.physical_rating, selectedA.playerName, selectedB.playerName),
+      technicalEdge: formatEdge(selectedA.technical_rating - selectedB.technical_rating, selectedA.playerName, selectedB.playerName),
+      tacticalEdge: formatEdge(selectedA.tactical_rating - selectedB.tactical_rating, selectedA.playerName, selectedB.playerName),
+      mentalEdge: formatEdge(selectedA.mental_rating - selectedB.mental_rating, selectedA.playerName, selectedB.playerName),
+      aAdvantages: biggestAdvantages(selectedA, selectedB, 'a'),
+      bAdvantages: biggestAdvantages(selectedA, selectedB, 'b'),
+      note: styleMatchupNote(selectedA, selectedB),
+    };
+  }, [selectedA, selectedB]);
+  const currentSaveSignature = useMemo(() => result ? JSON.stringify({ result, preview, title: saveTitle.trim() || autoTitle(result), notes: saveNotes }) : null, [result, preview, saveTitle, saveNotes]);
   const sameProfileSelected = Boolean(playerAProfileId && playerBProfileId && playerAProfileId === playerBProfileId);
 
   function clearGeneratedState() {
     setPreview(null);
     setResult(null);
     setSaveMessage(null);
+    setSavedMatchId(null);
+    setSavedSignature(null);
     setSaveTitle('');
     setSaveNotes('');
     setBatchResult(null);
@@ -204,7 +333,9 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
         preview,
         result,
       });
-      setSaveMessage(`Saved match #${saved.id}.`);
+      setSavedMatchId(saved.id);
+      setSavedSignature(currentSaveSignature);
+      setSaveMessage(`Already saved as #${saved.id}.`);
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Network error:')) {
         setError('Could not reach backend. Is run_backend.bat still running?');
@@ -217,9 +348,24 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
   }
 
   function randomizeSeed() {
+    if (seedLocked) {
+      setSeedMessage('Seed locked: unlock before randomizing.');
+      return;
+    }
     setSeed(randomSeed());
+    setSeedMessage(null);
     clearGeneratedState();
     setError(null);
+  }
+
+  async function copySeed() {
+    try {
+      await navigator.clipboard.writeText(seed);
+      setSeedMessage('Seed copied.');
+    } catch (error) {
+      setSeedMessage('Could not copy seed automatically.');
+    }
+    window.setTimeout(() => setSeedMessage(null), 3000);
   }
 
   async function generate(seedOverride?: string) {
@@ -231,6 +377,8 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
       setResult(generated);
       setSaveTitle(autoTitle(generated));
       setSaveMessage(null);
+      setSavedMatchId(null);
+      setSavedSignature(null);
       setSaveNotes('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not generate match');
@@ -240,9 +388,68 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
   }
 
   async function regenerate() {
+    if (seedLocked) {
+      setSeedMessage('Seed locked: Generate Match will reproduce the same result. Unlock to regenerate with a new seed.');
+      return;
+    }
     const nextSeed = randomSeed();
     setSeed(nextSeed);
+    setSeedMessage(null);
     await generate(nextSeed);
+  }
+
+  function swapPlayers() {
+    setPlayerAProfileId(playerBProfileId);
+    setPlayerBProfileId(playerAProfileId);
+    clearGeneratedState();
+    setError(null);
+  }
+
+  function persistSetups(nextSetups: SavedSetup[]) {
+    setSavedSetups(nextSetups);
+    window.localStorage.setItem(SETUPS_STORAGE_KEY, JSON.stringify(nextSetups));
+  }
+
+  function saveSetup() {
+    if (!playerAProfileId || !playerBProfileId) {
+      setSetupMessage('Choose two profiles before saving a setup.');
+      return;
+    }
+    const setup: SavedSetup = {
+      id: crypto.randomUUID(),
+      label: setupLabel.trim() || `${selectedA?.playerName ?? 'Player A'} vs ${selectedB?.playerName ?? 'Player B'} · ${matchType === 'league_timed_3x5' ? 'League Timed 3x5' : 'Tour BO5'}`,
+      player_a_profile_id: playerAProfileId,
+      player_b_profile_id: playerBProfileId,
+      match_type: matchType,
+      seed,
+      match_context: matchContext,
+      monte_carlo_runs: runs,
+    };
+    persistSetups([...savedSetups, setup]);
+    setSelectedSetupId(setup.id);
+    setSetupLabel('');
+    setSetupMessage(`Saved setup: ${setup.label}.`);
+  }
+
+  function loadSetup() {
+    const setup = savedSetups.find((entry) => entry.id === selectedSetupId);
+    if (!setup) return;
+    setPlayerAProfileId(setup.player_a_profile_id);
+    setPlayerBProfileId(setup.player_b_profile_id);
+    setMatchType(setup.match_type);
+    setSeed(setup.seed);
+    setRuns(setup.monte_carlo_runs);
+    setMatchContext(setup.match_context);
+    clearGeneratedState();
+    setSetupMessage(`Loaded setup: ${setup.label}.`);
+  }
+
+  function deleteSetup() {
+    if (!selectedSetupId) return;
+    const setup = savedSetups.find((entry) => entry.id === selectedSetupId);
+    persistSetups(savedSetups.filter((entry) => entry.id !== selectedSetupId));
+    setSelectedSetupId('');
+    setSetupMessage(setup ? `Deleted setup: ${setup.label}.` : 'Deleted setup.');
   }
 
 
@@ -300,28 +507,54 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
               <option value="league_timed_3x5">League Timed 3x5 · fixed clock</option>
             </select>
           </label>
+          <label className="field-label profile-search-field">
+            <span>Profile search</span>
+            <input value={profileSearch} onChange={(event) => setProfileSearch(event.target.value)} placeholder="Search name, country, year, style or rating" />
+            <small>{filteredProfiles.length} of {profiles.length} profiles shown.</small>
+          </label>
           <label className="field-label">
             <span>Player A season profile</span>
             <select value={playerAProfileId} onChange={(event) => { setPlayerAProfileId(Number(event.target.value)); clearGeneratedState(); }}>
-              {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profileLabel(profile)}</option>)}
+              {!filteredProfiles.some((profile) => profile.id === playerAProfileId) && selectedA && <option value={selectedA.id}>{profileLabel(selectedA)} (selected)</option>}
+              {filteredProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profileLabel(profile)}</option>)}
             </select>
           </label>
           <label className="field-label">
             <span>Player B season profile</span>
             <select value={playerBProfileId} onChange={(event) => { setPlayerBProfileId(Number(event.target.value)); clearGeneratedState(); }}>
-              {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profileLabel(profile)}</option>)}
+              {!filteredProfiles.some((profile) => profile.id === playerBProfileId) && selectedB && <option value={selectedB.id}>{profileLabel(selectedB)} (selected)</option>}
+              {filteredProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profileLabel(profile)}</option>)}
             </select>
           </label>
           <label className="field-label">
             <span>Seed</span>
-            <input value={seed} onChange={(event) => { setSeed(event.target.value); setSaveMessage(null); }} placeholder="Optional deterministic seed" />
-            <small>Same seed = same match. Use Randomize Seed or Regenerate Match for a fresh simulation.</small>
+            <input value={seed} onChange={(event) => { setSeed(event.target.value); setSaveMessage(null); setSavedMatchId(null); setSavedSignature(null); }} placeholder="Optional deterministic seed" />
+            <small>{seedLocked ? 'Seed locked: Generate Match will reproduce the same result.' : 'Same seed = same match. Randomize or Regenerate for a fresh simulation.'}</small>
+            <div className="button-row seed-control-row">
+              <button className="ghost-button" onClick={copySeed} type="button">Copy Seed</button>
+              <button className={seedLocked ? 'primary-button' : 'ghost-button'} onClick={() => { setSeedLocked(!seedLocked); setSeedMessage(!seedLocked ? 'Seed locked: Generate Match will reproduce the same result.' : 'Seed unlocked.'); }} type="button">{seedLocked ? 'Unlock seed' : 'Lock seed'}</button>
+            </div>
+            {seedMessage && <small>{seedMessage}</small>}
           </label>
           <label className="field-label">
             <span>Monte Carlo runs</span>
             <input max={3000} min={50} step={50} type="number" value={runs} onChange={(event) => setRuns(Number(event.target.value))} />
             <small>500 is recommended for fast local testing. Higher runs are useful but may feel slow on older PCs.</small>
           </label>
+        </div>
+        <div className="button-row match-actions profile-filter-row">
+          {([['all', 'All'], ['top-tour', 'Top Tour'], ['top-league', 'Top League'], ['2030', '2030 only'], ['custom', 'Custom players']] as [ProfileFilter, string][]).map(([key, label]) => (
+            <button className={profileFilter === key ? 'primary-button' : 'ghost-button'} key={key} onClick={() => setProfileFilter(key)} type="button">{label}</button>
+          ))}
+          <button className="ghost-button" disabled={loading !== null || !playerAProfileId || !playerBProfileId} onClick={swapPlayers} type="button">Swap A/B</button>
+        </div>
+
+        <div className="editor-card quick-create-card">
+          <div>
+            <strong>Need another player?</strong>
+            <p>Use Players → Quick Create Player, then return here. The Match Lab list refreshes when this page reloads.</p>
+          </div>
+          {onOpenPlayers && <button className="ghost-button" onClick={onOpenPlayers} type="button">Quick Create in Players</button>}
         </div>
 
         <details className="diagnostics-panel context-control-panel" open>
@@ -346,6 +579,26 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
           <div className="match-meta-line"><span>{contextText(matchContext)}</span></div>
         </details>
 
+        <div className="editor-card setup-card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Favorite match setups</p>
+              <h2>Saved Scenarios</h2>
+              <p>Save or reload this configuration only. Results are not saved here.</p>
+            </div>
+            {setupMessage && <span className="seed-pill">{setupMessage}</span>}
+          </div>
+          <div className="form-grid compact-grid">
+            <label className="field-label"><span>Setup label</span><input value={setupLabel} onChange={(event) => setSetupLabel(event.target.value)} placeholder="e.g. Elias home glass court" /></label>
+            <label className="field-label"><span>Load setup</span><select value={selectedSetupId} onChange={(event) => setSelectedSetupId(event.target.value)}><option value="">Choose saved setup…</option>{savedSetups.map((setup) => <option key={setup.id} value={setup.id}>{setup.label}</option>)}</select></label>
+          </div>
+          <div className="button-row match-actions">
+            <button className="ghost-button" onClick={saveSetup} type="button">Save Setup</button>
+            <button className="ghost-button" disabled={!selectedSetupId} onClick={loadSetup} type="button">Load Setup</button>
+            <button className="danger-button" disabled={!selectedSetupId} onClick={deleteSetup} type="button">Delete Setup</button>
+          </div>
+        </div>
+
         <div className="button-row match-actions">
           <button className="primary-button" disabled={loading !== null || profiles.length < 2 || sameProfileSelected} onClick={calculatePreview} type="button">
             {loading === 'preview' ? 'Calculating…' : 'Calculate Probabilities'}
@@ -353,8 +606,8 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
           <button className="ghost-button" disabled={loading !== null || profiles.length < 2 || sameProfileSelected} onClick={() => generate()} type="button">
             {loading === 'generate' ? 'Generating…' : 'Generate Match'}
           </button>
-          <button className="ghost-button" disabled={loading !== null} onClick={randomizeSeed} type="button">Randomize Seed</button>
-          <button className="ghost-button" disabled={loading !== null || profiles.length < 2 || sameProfileSelected} onClick={regenerate} type="button">
+          <button className="ghost-button" disabled={loading !== null || seedLocked} onClick={randomizeSeed} type="button">Randomize Seed</button>
+          <button className="ghost-button" disabled={loading !== null || seedLocked || profiles.length < 2 || sameProfileSelected} onClick={regenerate} type="button">
             {loading === 'generate' ? 'Regenerating…' : 'Regenerate Match'}
           </button>
           <button className="ghost-button" disabled={!result} type="button" onClick={() => document.getElementById('save-match-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>Save Match</button>
@@ -370,6 +623,32 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
               <p>Tour {profile.tournament_rating.toFixed(1)} · Mental {profile.mental_rating.toFixed(1)} · Physical {profile.physical_rating.toFixed(1)}</p>
             </div>
           ))}
+        </div>
+      )}
+
+      {selectedA && selectedB && comparison && (
+        <div className="editor-card matchup-comparison-card">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Selected matchup comparison</p>
+              <h2>{selectedA.playerName} vs {selectedB.playerName}</h2>
+            </div>
+            <span className="seed-pill">{matchType === 'league_timed_3x5' ? 'League Timed 3x5' : 'Tour BO5'}</span>
+          </div>
+          <div className="scoreline-grid comparison-grid">
+            <span>Tour rating edge: <strong>{comparison.tourEdge}</strong></span>
+            <span>League rating edge: <strong>{comparison.leagueEdge}</strong></span>
+            <span>Physical edge: <strong>{comparison.physicalEdge}</strong></span>
+            <span>Technical edge: <strong>{comparison.technicalEdge}</strong></span>
+            <span>Tactical edge: <strong>{comparison.tacticalEdge}</strong></span>
+            <span>Mental edge: <strong>{comparison.mentalEdge}</strong></span>
+          </div>
+          <div className="ratings-grid matchup-grid">
+            <div className="rating-card"><span>Biggest A advantages</span><strong>{selectedA.playerName}</strong><p>{comparison.aAdvantages.join(' · ') || 'No clear attribute edge.'}</p></div>
+            <div className="rating-card"><span>Biggest B advantages</span><strong>{selectedB.playerName}</strong><p>{comparison.bAdvantages.join(' · ') || 'No clear attribute edge.'}</p></div>
+          </div>
+          <p>{comparison.note}</p>
+          <p><strong>Format suggestion:</strong> Tour BO5 favors attritional/recovery/tactical edge. League Timed favors pace/attack/creativity edge.</p>
         </div>
       )}
 
@@ -516,8 +795,8 @@ export function MatchLab({ onOpenSavedMatches }: MatchLabProps) {
               </label>
             </div>
             <div className="button-row match-actions">
-              <button className="primary-button" disabled={loading !== null || !result} onClick={saveGeneratedMatch} type="button">
-                {loading === 'save' ? 'Saving…' : 'Save Match'}
+              <button className="primary-button" disabled={loading !== null || !result || (Boolean(savedMatchId) && savedSignature === currentSaveSignature)} onClick={saveGeneratedMatch} type="button">
+                {loading === 'save' ? 'Saving…' : savedMatchId && savedSignature === currentSaveSignature ? `Already saved #${savedMatchId}` : 'Save Match'}
               </button>
               {saveMessage && onOpenSavedMatches && (
                 <button className="ghost-button" onClick={onOpenSavedMatches} type="button">Open Saved Matches</button>

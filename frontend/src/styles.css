@@ -795,3 +795,46 @@ pre.dev-result {
     grid-template-columns: 1fr;
   }
 }
+
+.profile-search-field {
+  grid-column: span 2;
+}
+
+.profile-filter-row,
+.seed-control-row {
+  align-items: center;
+}
+
+.quick-create-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  border-style: dashed;
+}
+
+.quick-create-card p,
+.matchup-comparison-card p,
+.setup-card p {
+  margin: 0.35rem 0 0;
+  color: #a9bac6;
+  line-height: 1.6;
+}
+
+.comparison-grid strong {
+  color: #f4fbff;
+}
+
+@media (max-width: 1100px) {
+  .profile-search-field {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .quick-create-card {
+    align-items: stretch;
+    display: grid;
+  }
+}
