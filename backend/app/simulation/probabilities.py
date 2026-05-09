@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.simulation.calibration import style_edge, volatility_index
 from app.simulation.match_types import MatchPlayer
 from app.simulation.tour_match_engine import child_seed, simulate_tour_match
 
@@ -69,4 +70,11 @@ def preview_probabilities(a: MatchPlayer, b: MatchPlayer, seed: int, runs: int) 
         "style_edge_summary": f"{a.name} brings {a.play_style}; {b.name} brings {b.play_style}. Subtle style modifiers affect initiative, rally length and volatility.",
         "physical_edge_summary": edge_summary("Physical", a.name, b.name, a.rating("physical_rating"), b.rating("physical_rating")),
         "pressure_edge_summary": edge_summary("Pressure", a.name, b.name, a.rating("mental_rating"), b.rating("mental_rating")),
+        "preview_diagnostics": {
+            "rating_edge": round(rating_diff, 2),
+            "style_edge": style_edge(a, b, league=False),
+            "format_edge": "Tour BO5 leans toward recovery, length quality, defensive repeatability and pressure discipline.",
+            "volatility_estimate": volatility_index(a, b, league=False),
+            "expected_closeness": round(1 - min(abs(rating_diff) / 28, 1), 2),
+        },
     }

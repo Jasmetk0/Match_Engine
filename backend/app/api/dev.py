@@ -1,5 +1,6 @@
 import json
 import shutil
+from collections import Counter
 from datetime import datetime
 from typing import Any
 
@@ -226,6 +227,87 @@ def import_saved_matches(payload: ImportSavedMatchesRequest, db: Session = Depen
         matches_to_import = []
 
     return {"imported_count": len(matches_to_import), "skipped_duplicates": skipped_duplicates, "errors": errors}
+
+
+def _realism_flags(match_type: str, avg_clean: float, avg_broadcast: float, avg_points: float, avg_shots: float, scorelines: Counter[str], runs: int, draw_rate: float = 0.0) -> list[str]:
+    flags: list[str] = []
+    if match_type == "tour_bo5":
+        sweep_rate = sum(count for score, count in scorelines.items() if score.startswith("3-0") or score.endswith("0-3")) / runs
+        if avg_clean < 14 * 60:
+            flags.append("Tour clean time too short")
+        if avg_broadcast < 32 * 60:
+            flags.append("Tour broadcast estimate too short")
+        if sweep_rate > 0.58:
+            flags.append("3-0 sweep rate too high")
+        if avg_shots < 10.0:
+            flags.append("Average rally shots too low")
+        if avg_points < 48:
+            flags.append("Tour total points too low")
+    else:
+        if not (15 * 60 <= avg_clean <= 16.75 * 60):
+            flags.append("League clean time outside timed format target")
+        if avg_broadcast < 18 * 60 or avg_broadcast > 23 * 60:
+            flags.append("League broadcast estimate outside target")
+        if avg_points > 68:
+            flags.append("League scores too high")
+        if draw_rate > 0.22:
+            flags.append("Draw rate too high")
+        if avg_shots < 6.5:
+            flags.append("Average rally shots too low")
+    return flags or ["Within current calibration guardrails"]
+
+
+@router.post("/realism-report")
+def realism_report(db: Session = Depends(get_db)):
+    _upsert_elite_sample_players(db)
+    names = ["Arebady Macky jr", "Benjamin Paris", "Olivier da Silva"]
+    players = {name: build_match_player(_find_sample_profile(db, name)) for name in names}
+    matchups = [("Arebady Macky jr", "Benjamin Paris"), ("Benjamin Paris", "Olivier da Silva"), ("Arebady Macky jr", "Olivier da Silva")]
+    runs = 100
+    rows: list[dict[str, Any]] = []
+
+    for match_type in ["tour_bo5", "league_timed_3x5"]:
+        for left, right in matchups:
+            a = players[left]
+            b = players[right]
+            wins = {a.profile_id: 0, b.profile_id: 0, None: 0}
+            total_points = total_clean = total_broadcast = total_shots = 0.0
+            scorelines: Counter[str] = Counter()
+            for index in range(runs):
+                seed = normalize_seed(f"realism-report:{match_type}:{left}:{right}:{index}")
+                result = simulate_league_timed_match(a, b, seed, include_rallies=False) if match_type == "league_timed_3x5" else simulate_tour_match(a, b, seed, include_rallies=False)
+                winner_id = result["winner"]["profile_id"] if result.get("winner") else None
+                wins[winner_id] += 1
+                stats = result["stats"]
+                total_points += sum(stats["total_points"].values())
+                total_clean += stats.get("clean_rally_time_seconds", stats.get("total_duration_seconds", 0.0))
+                total_broadcast += stats.get("estimated_broadcast_duration_seconds", 0.0)
+                total_shots += stats.get("average_rally_shots", 0.0)
+                if match_type == "league_timed_3x5":
+                    scoreline = result.get("match_score_text", "unknown").split(" (")[0]
+                else:
+                    scoreline = result.get("match_score_text", "unknown").split(" ")[0]
+                scorelines[scoreline] += 1
+            avg_points = round(total_points / runs, 1)
+            avg_clean = round(total_clean / runs, 1)
+            avg_broadcast = round(total_broadcast / runs, 1)
+            avg_shots = round(total_shots / runs, 1)
+            draw_rate = wins[None] / runs
+            rows.append({
+                "match_type": match_type,
+                "matchup": f"{left} vs {right}",
+                "player_a_win_rate": round(wins[a.profile_id] / runs, 3),
+                "player_b_win_rate": round(wins[b.profile_id] / runs, 3),
+                "draw_rate": round(draw_rate, 3) if match_type == "league_timed_3x5" else 0.0,
+                "average_total_points": avg_points,
+                "average_clean_time": avg_clean,
+                "average_broadcast_time": avg_broadcast,
+                "average_rally_shots": avg_shots,
+                "common_scorelines": [{"scoreline": score, "count": count} for score, count in scorelines.most_common(5)],
+                "notes": "Deterministic 100-run calibration sample using elite seeded players; matches are not saved.",
+                "realism_flags": _realism_flags(match_type, avg_clean, avg_broadcast, avg_points, avg_shots, scorelines, runs, draw_rate),
+            })
+    return {"runs_per_matchup": runs, "generated_at": datetime.utcnow().isoformat() + "Z", "reports": rows}
 
 
 @router.post("/self-test")
